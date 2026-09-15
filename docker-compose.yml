@@ -1,0 +1,111 @@
+# Bela-HRMS on a single private VPS.
+#
+# Three services and no orchestrator: Postgres, the application, and Caddy in
+# front doing TLS. For one company on one machine this is the right size — a
+# Kubernetes cluster to run one Next.js process is a second system to operate,
+# and the operator here is an IT team of one or two.
+#
+#   docker compose up -d
+#
+# Migrations run as a one-shot service that must succeed before the app starts,
+# rather than from the app's own boot. Two replicas booting together would race
+# for the migration lock; the loser crashes or serves a half-migrated schema.
+
+name: bela-hrms
+
+services:
+  postgres:
+    image: postgres:18-alpine
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER:?set POSTGRES_USER in .env}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD:?set POSTGRES_PASSWORD in .env}
+      POSTGRES_DB: ${POSTGRES_DB:?set POSTGRES_DB in .env}
+      # UTF-8 and a deterministic collation. The default template on some hosts
+      # cannot store Devanagari, and the failure surfaces as a constraint error
+      # on the first Nepali name rather than as anything about encoding.
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --lc-collate=C --lc-ctype=C"
+    volumes:
+      - postgres-data:/var/lib/postgresql/data
+      # Written by deploy/backup.sh; mounted so a dump lands on the host disk
+      # where the off-site copy can pick it up.
+      - ./backups:/backups
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 30s
+    # No published port. The database is reachable only from this compose
+    # network; exposing 5432 on a public VPS is how these get found.
+    networks: [internal]
+
+  migrate:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
+    image: bela-hrms:latest
+    restart: "no"
+    command: ["node", "scripts/migrate.mjs"]
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+    depends_on:
+      postgres:
+        condition: service_healthy
+    networks: [internal]
+
+  app:
+    build:
+      context: .
+      target: runner
+      args:
+        NEXT_PUBLIC_APP_URL: https://${APP_DOMAIN}
+    image: bela-hrms:latest
+    restart: unless-stopped
+    environment:
+      DATABASE_URL: postgres://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/${POSTGRES_DB}
+      BETTER_AUTH_SECRET: ${BETTER_AUTH_SECRET:?generate with openssl rand -base64 48}
+      # The public origin as the browser sees it. Behind a proxy this is the
+      # external URL; the container's own address here breaks the session cookie.
+      BETTER_AUTH_URL: https://${APP_DOMAIN}
+      TZ: Asia/Kathmandu
+    depends_on:
+      postgres:
+        condition: service_healthy
+      migrate:
+        condition: service_completed_successfully
+    # Also unpublished: only Caddy talks to it.
+    networks: [internal, web]
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+      - "443:443/udp"
+    environment:
+      APP_DOMAIN: ${APP_DOMAIN:?set APP_DOMAIN in .env}
+      ACME_EMAIL: ${ACME_EMAIL:?set ACME_EMAIL in .env}
+    volumes:
+      - ./deploy/Caddyfile:/etc/caddy/Caddyfile:ro
+      # Certificates survive a recreate. Losing this volume means re-requesting
+      # from Let's Encrypt, and their rate limit is five per week per domain.
+      - caddy-data:/data
+      - caddy-config:/config
+    depends_on:
+      - app
+    networks: [web]
+
+volumes:
+  postgres-data:
+  caddy-data:
+  caddy-config:
+
+networks:
+  # Database and application. No route in from outside.
+  internal:
+  # Only Caddy and the app.
+  web:

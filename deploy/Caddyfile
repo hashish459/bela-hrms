@@ -1,0 +1,45 @@
+# TLS, compression and a couple of headers. Caddy obtains and renews the
+# certificate on its own, which is the entire reason it is here rather than
+# nginx plus certbot plus a cron job plus a renewal hook.
+
+{
+	email {$ACME_EMAIL}
+	# Caddy's own admin API, unauthenticated by default. Nothing needs it here.
+	admin off
+}
+
+{$APP_DOMAIN} {
+	encode zstd gzip
+
+	# The application reads the public origin from BETTER_AUTH_URL, but Next
+	# still needs to know the request arrived over TLS to build absolute URLs
+	# and to mark cookies secure.
+	reverse_proxy app:3000 {
+		header_up X-Forwarded-Proto {scheme}
+		header_up X-Real-IP {remote_host}
+
+		# Take a container out of rotation when its database is unreachable
+		# rather than serving 500s from it.
+		health_uri /api/health
+		health_interval 15s
+		health_timeout 5s
+	}
+
+	header {
+		# Duplicated from next.config.ts on purpose: whichever layer is bypassed,
+		# the other still sets them.
+		Strict-Transport-Security "max-age=31536000; includeSubDomains"
+		X-Content-Type-Options "nosniff"
+		X-Frame-Options "DENY"
+		Referrer-Policy "strict-origin-when-cross-origin"
+		-Server
+	}
+
+	log {
+		output file /data/access.log {
+			roll_size 20mb
+			roll_keep 10
+		}
+		format json
+	}
+}

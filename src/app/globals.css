@@ -1,0 +1,267 @@
+@import "tailwindcss";
+
+/*
+  Design tokens.
+
+  An ERP is scanned, not read: dense tables, long sessions, a lot of status. The
+  ground stays quiet and near-neutral, one accent carries interaction, and colour
+  is reserved for state somebody has to act on.
+*/
+@theme {
+  --font-sans: var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif;
+  --font-mono: var(--font-plex-mono), ui-monospace, "Cascadia Mono", monospace;
+
+  --color-ground: #f4f6f5;
+  --color-surface: #ffffff;
+  --color-sunk: #eaeeec;
+  --color-ink: #131c1b;
+  --color-ink-soft: #4a5755;
+  --color-ink-faint: #7a8785;
+  --color-line: #dbe2e0;
+  --color-line-soft: #e8ecea;
+
+  --color-accent: #0f6e63;
+  --color-accent-hover: #0c574e;
+  --color-accent-soft: #e2efec;
+  --color-on-accent: #ffffff;
+
+  --color-ok: #17694a;
+  --color-ok-soft: #e0f0e8;
+  --color-warn: #8a5b0c;
+  --color-warn-soft: #f6eddc;
+  --color-danger: #8c3a2b;
+  --color-danger-soft: #f7e7e3;
+  --color-info: #2c5f8a;
+  --color-info-soft: #e3edf5;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    --color-ground: #0e1615;
+    --color-surface: #16201e;
+    --color-sunk: #0b1211;
+    --color-ink: #e7edeb;
+    --color-ink-soft: #a4b1ae;
+    --color-ink-faint: #75827f;
+    --color-line: #27332f;
+    --color-line-soft: #1e2927;
+
+    --color-accent: #4dbcac;
+    --color-accent-hover: #6cd0c1;
+    --color-accent-soft: #113029;
+    --color-on-accent: #06201c;
+
+    --color-ok: #5cbf92;
+    --color-ok-soft: #102b21;
+    --color-warn: #d6a256;
+    --color-warn-soft: #2e2412;
+    --color-danger: #e08a76;
+    --color-danger-soft: #301c17;
+    --color-info: #77aede;
+    --color-info-soft: #14232f;
+  }
+}
+
+:root[data-theme="dark"] {
+  --color-ground: #0e1615;
+  --color-surface: #16201e;
+  --color-sunk: #0b1211;
+  --color-ink: #e7edeb;
+  --color-ink-soft: #a4b1ae;
+  --color-ink-faint: #75827f;
+  --color-line: #27332f;
+  --color-line-soft: #1e2927;
+
+  --color-accent: #4dbcac;
+  --color-accent-hover: #6cd0c1;
+  --color-accent-soft: #113029;
+  --color-on-accent: #06201c;
+
+  --color-ok: #5cbf92;
+  --color-ok-soft: #102b21;
+  --color-warn: #d6a256;
+  --color-warn-soft: #2e2412;
+  --color-danger: #e08a76;
+  --color-danger-soft: #301c17;
+  --color-info: #77aede;
+  --color-info-soft: #14232f;
+}
+
+html,
+body {
+  background: var(--color-ground);
+  color: var(--color-ink);
+}
+
+body {
+  font-family: var(--font-sans);
+  -webkit-font-smoothing: antialiased;
+}
+
+/* Digits in a column have to line up. */
+.tabular {
+  font-variant-numeric: tabular-nums;
+}
+
+*:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+::selection {
+  background: var(--color-accent-soft);
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.01ms !important;
+    transition-duration: 0.01ms !important;
+  }
+}
+
+/* ==========================================================================
+   Appearance preferences
+
+   Set as data-attributes on <html> by lib/appearance.ts, applied before paint by
+   the inline script in the root layout so there is no flash of the wrong theme.
+   Each layer only redefines tokens; no component reads these attributes directly.
+   ========================================================================== */
+
+/* ---- accent -------------------------------------------------------------- */
+:root[data-accent="teal"] {
+  --color-accent: #0f6e63;
+  --color-accent-hover: #0c574e;
+  --color-accent-soft: #e2efec;
+  --color-on-accent: #ffffff;
+}
+:root[data-accent="blue"] {
+  --color-accent: #1f5fa8;
+  --color-accent-hover: #184b86;
+  --color-accent-soft: #e4edf7;
+  --color-on-accent: #ffffff;
+}
+:root[data-accent="indigo"] {
+  --color-accent: #4b46a8;
+  --color-accent-hover: #3b3787;
+  --color-accent-soft: #eae9f7;
+  --color-on-accent: #ffffff;
+}
+:root[data-accent="amber"] {
+  --color-accent: #9a6410;
+  --color-accent-hover: #7d500b;
+  --color-accent-soft: #f8efdd;
+  --color-on-accent: #ffffff;
+}
+:root[data-accent="rose"] {
+  --color-accent: #a33b58;
+  --color-accent-hover: #872f47;
+  --color-accent-soft: #f8e6ea;
+  --color-on-accent: #ffffff;
+}
+
+/* The brand pairing: navy ground with the logo's orange as the accent. */
+:root[data-accent="brand"] {
+  --color-accent: #e8722a;
+  --color-accent-hover: #cf5f1c;
+  --color-accent-soft: #fdeee3;
+  --color-on-accent: #1b2a4a;
+}
+
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-accent="teal"] {
+    --color-accent: #4dbcac; --color-accent-hover: #6cd0c1;
+    --color-accent-soft: #113029; --color-on-accent: #06201c;
+  }
+  :root:not([data-theme="light"])[data-accent="blue"] {
+    --color-accent: #6ea8e6; --color-accent-hover: #8dbcef;
+    --color-accent-soft: #132538; --color-on-accent: #0a1725;
+  }
+  :root:not([data-theme="light"])[data-accent="indigo"] {
+    --color-accent: #9d98f0; --color-accent-hover: #b3aff5;
+    --color-accent-soft: #1d1b3a; --color-on-accent: #12102a;
+  }
+  :root:not([data-theme="light"])[data-accent="amber"] {
+    --color-accent: #dda45c; --color-accent-hover: #e8b878;
+    --color-accent-soft: #302411; --color-on-accent: #1f1607;
+  }
+  :root:not([data-theme="light"])[data-accent="rose"] {
+    --color-accent: #e58ca4; --color-accent-hover: #eda6b9;
+    --color-accent-soft: #331722; --color-on-accent: #240d15;
+  }
+  :root:not([data-theme="light"])[data-accent="brand"] {
+    --color-accent: #f4903f; --color-accent-hover: #f7a45f;
+    --color-accent-soft: #35200f; --color-on-accent: #1b2a4a;
+  }
+}
+
+:root[data-theme="dark"][data-accent="teal"] {
+  --color-accent: #4dbcac; --color-accent-hover: #6cd0c1;
+  --color-accent-soft: #113029; --color-on-accent: #06201c;
+}
+:root[data-theme="dark"][data-accent="blue"] {
+  --color-accent: #6ea8e6; --color-accent-hover: #8dbcef;
+  --color-accent-soft: #132538; --color-on-accent: #0a1725;
+}
+:root[data-theme="dark"][data-accent="indigo"] {
+  --color-accent: #9d98f0; --color-accent-hover: #b3aff5;
+  --color-accent-soft: #1d1b3a; --color-on-accent: #12102a;
+}
+:root[data-theme="dark"][data-accent="amber"] {
+  --color-accent: #dda45c; --color-accent-hover: #e8b878;
+  --color-accent-soft: #302411; --color-on-accent: #1f1607;
+}
+:root[data-theme="dark"][data-accent="rose"] {
+  --color-accent: #e58ca4; --color-accent-hover: #eda6b9;
+  --color-accent-soft: #331722; --color-on-accent: #240d15;
+}
+:root[data-theme="dark"][data-accent="brand"] {
+  --color-accent: #f4903f; --color-accent-hover: #f7a45f;
+  --color-accent-soft: #35200f; --color-on-accent: #1b2a4a;
+}
+
+/* ---- typeface ------------------------------------------------------------ */
+:root[data-font="serif"] {
+  --font-sans: var(--font-plex-serif), Georgia, "Times New Roman", serif;
+}
+:root[data-font="system"] {
+  --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
+}
+
+/* ---- text size ----------------------------------------------------------- */
+/* Scales everything, because the whole UI is sized in rem off the root. */
+:root[data-size="sm"]  { font-size: 13px; }
+:root[data-size="md"]  { font-size: 14px; }
+:root[data-size="lg"]  { font-size: 15px; }
+:root[data-size="xl"]  { font-size: 16px; }
+
+/* ---- density ------------------------------------------------------------- */
+/* Compact trims table and card padding for people working a full day in here. */
+:root[data-density="compact"] td,
+:root[data-density="compact"] th {
+  padding-top: 0.3rem;
+  padding-bottom: 0.3rem;
+}
+:root[data-density="compact"] .card-pad {
+  padding: 0.6rem;
+}
+
+/* ---- contrast ------------------------------------------------------------ */
+:root[data-contrast="high"] {
+  --color-ink-soft: var(--color-ink);
+  --color-ink-faint: #55625f;
+  --color-line: #b9c4c1;
+}
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"])[data-contrast="high"] {
+    --color-ink-soft: #f2f6f5;
+    --color-ink-faint: #b9c5c2;
+    --color-line: #445350;
+  }
+}
+:root[data-theme="dark"][data-contrast="high"] {
+  --color-ink-soft: #f2f6f5;
+  --color-ink-faint: #b9c5c2;
+  --color-line: #445350;
+}

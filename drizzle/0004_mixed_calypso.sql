@@ -1,0 +1,1 @@
+ALTER TYPE "public"."attendance_status" ADD VALUE 'field_work' BEFORE 'missing_punch';

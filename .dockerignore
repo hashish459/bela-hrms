@@ -1,0 +1,39 @@
+# Everything the build does not need, and everything it must never receive.
+#
+# The second half matters more: .env holds the database password and the auth
+# secret, and a COPY . . would bake them into an image layer where they survive
+# every later deletion.
+
+.env
+.env.*
+!.env.example
+
+node_modules
+.next
+out
+build
+dist
+
+.git
+.gitignore
+.github
+
+Dockerfile*
+docker-compose*.yml
+.dockerignore
+
+*.md
+!README.md
+
+.vscode
+.idea
+.DS_Store
+
+coverage
+*.log
+tsconfig.tsbuildinfo
+next-env.d.ts
+
+# Operational scripts that belong on the host, not in the image.
+deploy/backup.sh
+deploy/restore.sh

@@ -1,0 +1,97 @@
+#!/usr/bin/env bash
+#
+# One entry point for everything a developer does with this project.
+#
+#   ./bela up                start it (checks, migrates, resolves the port)
+#   ./bela doctor            why is it not working
+#   ./bela db fresh --full   throw the database away and rebuild it
+#   ./bela db status         what is in there
+#   ./bela check             run every verification suite
+#   ./bela reset             nuke node_modules and .next, reinstall
+#
+# A dispatcher rather than a Makefile: `make` is not installed by default on
+# Windows, and every developer on this project has bash through Git Bash.
+
+set -euo pipefail
+cd "$(dirname "$0")"
+
+BOLD=$'\033[1m'; DIM=$'\033[90m'; CYAN=$'\033[36m'; RESET=$'\033[0m'
+
+usage() {
+  cat <<EOF
+
+${BOLD}Bela-HRMS${RESET}
+
+  ${CYAN}./bela up${RESET} [--port N] [--fresh] [--prod] [--studio]
+      Start everything. Checks the database, applies pending migrations,
+      finds a free port if the one you asked for is taken.
+
+  ${CYAN}./bela doctor${RESET}
+      Diagnose the environment. Every failure prints the command that fixes it.
+
+  ${CYAN}./bela db${RESET} <fresh|status|create|drop> [--full] [--empty] [--yes]
+      fresh   drop, create with UTF8, migrate, seed
+      full    …and a complete closed previous fiscal year
+      empty   …schema only
+
+  ${CYAN}./bela check${RESET}
+      typecheck, lint, and every verification suite against the real database.
+
+  ${CYAN}./bela build${RESET}     Production build.
+  ${CYAN}./bela reset${RESET}     Remove node_modules and .next, reinstall.
+  ${CYAN}./bela stop${RESET}      Stop a dev server left running.
+
+${DIM}  Everything here is also a pnpm script: pnpm up, pnpm doctor, pnpm db:fresh${RESET}
+
+EOF
+}
+
+cmd="${1:-help}"
+shift || true
+
+case "$cmd" in
+  up)      exec node scripts/dev/up.mjs "$@" ;;
+  doctor)  exec node scripts/dev/doctor.mjs "$@" ;;
+  db)      exec node scripts/dev/db.mjs "$@" ;;
+  build)   exec pnpm build ;;
+
+  check)
+    # Static first: a type error makes every runtime failure below it noise.
+    pnpm typecheck
+    pnpm lint
+    for suite in isolation org leave pagination self attendance; do
+      echo
+      echo "${BOLD}check:${suite}${RESET}"
+      pnpm "check:${suite}"
+    done
+    ;;
+
+  stop)
+    # Ask the app to identify itself before killing anything: the port may
+    # belong to somebody else's server.
+    for port in 3000 3001 3002 3003; do
+      if curl -sf --max-time 1 "http://127.0.0.1:${port}/api/health" >/dev/null 2>&1; then
+        echo "Stopping Bela-HRMS on ${port}"
+        if command -v powershell.exe >/dev/null 2>&1; then
+          powershell.exe -NoProfile -Command "
+            Get-NetTCPConnection -LocalPort ${port} -State Listen -ErrorAction SilentlyContinue |
+              Select-Object -ExpandProperty OwningProcess -Unique |
+              ForEach-Object { Stop-Process -Id \$_ -Force }" >/dev/null 2>&1 || true
+        else
+          lsof -ti ":${port}" 2>/dev/null | xargs -r kill || true
+        fi
+      fi
+    done
+    echo "Done."
+    ;;
+
+  reset)
+    echo "Removing node_modules and .next…"
+    rm -rf node_modules .next tsconfig.tsbuildinfo
+    pnpm install
+    echo "Reinstalled. Next: ./bela doctor"
+    ;;
+
+  help|--help|-h) usage ;;
+  *) echo "Unknown command: $cmd"; usage; exit 1 ;;
+esac
