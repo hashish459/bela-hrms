@@ -64,7 +64,7 @@ export function AppShell({
   return (
     <div className="flex min-h-screen flex-col">
       {/* ------------------------------------------------------------ header */}
-      <header className="sticky top-0 z-40 flex h-12 shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
+      <header className="sticky top-0 z-40 flex h-12 print:hidden shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
         <button
           type="button"
           onClick={() => setDrawer(true)}
@@ -174,7 +174,7 @@ export function AppShell({
         {/* --------------------------------------------------------- sidebar */}
         <aside
           className={cn(
-            "sticky top-12 hidden h-[calc(100vh-3rem)] shrink-0 border-r border-line bg-surface md:block",
+            "sticky top-12 hidden h-[calc(100vh-3rem)] shrink-0 border-r border-line bg-surface md:block print:hidden",
             "transition-[width] duration-150 ease-out",
             railed ? "w-14" : "w-64",
           )}
@@ -222,12 +222,12 @@ export function AppShell({
 
         {/* ------------------------------------------------------------ main */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <main className="flex-1 px-4 py-5 md:px-6">
+          <main className="flex-1 px-4 py-5 md:px-6 print:p-0">
             <Breadcrumb modules={modules} />
             {children}
           </main>
 
-          <footer className="border-t border-line px-4 py-3 md:px-6">
+          <footer className="border-t border-line px-4 py-3 md:px-6 print:hidden">
             <p className="flex flex-wrap items-center gap-x-3 gap-y-1 text-[11px] text-ink-faint">
               <span>
                 © {APP.copyrightYear} {APP.company}

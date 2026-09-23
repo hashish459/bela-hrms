@@ -161,8 +161,8 @@ export const MODULES: ModuleDefinition[] = [
         "Overtime claims against the OT minutes attendance already computes, with their own approval chain and rate rules."),
       ready("attendance.devices", "Devices", "/attendance/devices", "Fingerprint", "attendance.device.manage", "Setup",
         "Biometric and card readers, who is enrolled on them, and the raw punch log they push."),
-      planned("attendance.reports", "Reports", "/attendance/reports", "BarChart3", "attendance.record.viewAll", "Reports",
-        "Late arrival, absenteeism, overtime and muster-roll reports, exportable for payroll."),
+      ready("attendance.reports", "Reports", "/attendance/reports", "BarChart3", "attendance.record.viewAll", "Reports",
+        "Overview, muster roll, lateness, absenteeism, overtime, exceptions and department reports, exportable to CSV."),
     ],
   },
 

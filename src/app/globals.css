@@ -265,3 +265,51 @@ body {
   --color-ink-faint: #b9c5c2;
   --color-line: #445350;
 }
+
+/* ==========================================================================
+   Print
+
+   Reports print from the browser ("Print / PDF"). Paper is always light, so
+   the light tokens are forced whatever theme is on screen — the selector
+   out-ranks the dark-scheme rules above. Colours are kept exact because a
+   chart whose segments print as grey is a chart nobody can read.
+   ========================================================================== */
+@media print {
+  @page {
+    size: A4 landscape;
+    margin: 12mm;
+  }
+
+  html:root:not([data-print-theme]) {
+    --color-ground: #ffffff;
+    --color-surface: #ffffff;
+    --color-sunk: #f1f4f3;
+    --color-ink: #131c1b;
+    --color-ink-soft: #4a5755;
+    --color-ink-faint: #7a8785;
+    --color-line: #d5dcda;
+    --color-line-soft: #e4e9e7;
+    --color-ok: #17694a;
+    --color-ok-soft: #e0f0e8;
+    --color-warn: #8a5b0c;
+    --color-warn-soft: #f6eddc;
+    --color-danger: #8c3a2b;
+    --color-danger-soft: #f7e7e3;
+    --color-info: #2c5f8a;
+    --color-info-soft: #e3edf5;
+  }
+
+  * {
+    -webkit-print-color-adjust: exact;
+    print-color-adjust: exact;
+  }
+
+  thead {
+    display: table-header-group;
+  }
+
+  tr,
+  section {
+    break-inside: avoid;
+  }
+}

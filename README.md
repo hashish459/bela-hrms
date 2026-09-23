@@ -49,7 +49,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | Module | Status | Screens |
 |---|---|---|
 | **Employees** | 2 of 7 built | Employees, Reporting Lines · *documents, confirmations, transfers, separations, recruitment planned* |
-| **Attendance** | 7 of 10 built | My Attendance, Daily Register, Monthly Sheet, My Requests, Approvals, Shift Master, Shift Assignment · *overtime, devices, reports planned* |
+| **Attendance** | 9 of 10 built | My Attendance, Daily Register, Monthly Sheet, My Requests, Approvals, Shift Master, Shift Assignment, Devices, Reports (overview, muster roll, late & early exit, absenteeism with Bradford factor, overtime, exceptions, departments — CSV export and print) · *overtime claims planned* |
 | **Leave** | 7 of 9 built | My Leave, Approvals, Register, Calendar, Balances, Types, Policy · *encashment, lapse planned* |
 | **Payroll** | planned | Salary heads and structure, monthly run, payslips, TDS, SSF/PF, bank advice |
 | **Appraisal** | planned | KRA/KPI, rating scales, cycles, self appraisal, reviews, results |

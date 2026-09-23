@@ -449,7 +449,7 @@ export function Breadcrumb({ modules }: { modules: NavModule[] }) {
   ) as string[];
 
   return (
-    <nav aria-label="Breadcrumb" className="mb-3">
+    <nav aria-label="Breadcrumb" className="mb-3 print:hidden">
       <ol className="flex flex-wrap items-center gap-1.5 text-[11px] text-ink-faint">
         <li>
           <Link href="/dashboard" className="hover:text-ink-soft">
