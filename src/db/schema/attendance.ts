@@ -14,18 +14,20 @@
  * leave. The legacy schema only wrote rows when somebody punched, so "absent" and
  * "no record yet" were indistinguishable and every report had to guess.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   date,
   index,
   integer,
+  numeric,
   pgEnum,
   pgTable,
   text,
   time,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./core";
@@ -247,3 +249,84 @@ export const attendanceRequestsRelations = relations(attendanceRequests, ({ one 
     references: [employees.id],
   }),
 }));
+
+/* ------------------------------------------------------------------ overtime */
+
+/** What kind of day the overtime was worked on; each has its own rate. */
+export const overtimeDayKind = pgEnum("overtime_day_kind", ["working_day", "weekly_off", "public_holiday"]);
+
+export const overtimeClaimStatus = pgEnum("overtime_claim_status", ["pending", "approved", "rejected", "withdrawn"]);
+
+/**
+ * Rate rules per organisation and kind of day. No row means the default in
+ * `lib/attendance/overtime.ts` (1.5× on a working day, 2× on a weekly off or a
+ * public holiday), which is the Labour Act's floor, not a ceiling.
+ */
+export const overtimeRules = pgTable(
+  "overtime_rules",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    dayKind: overtimeDayKind("day_kind").notNull(),
+    /** Pay multiplier on the claimed time, e.g. 1.50. */
+    multiplier: numeric("multiplier", { precision: 4, scale: 2 }).notNull(),
+    /** Below this, a day's overtime is not claimable — ten minutes over is not overtime. */
+    minMinutes: integer("min_minutes").notNull().default(30),
+    /** The most one day can carry, whatever the punches say. */
+    maxMinutes: integer("max_minutes").notNull().default(240),
+    updatedByLabel: text("updated_by_label"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [unique("overtime_rules_org_kind_key").on(t.orgId, t.dayKind)],
+);
+
+/**
+ * An overtime claim: a request to be paid for time attendance already shows.
+ *
+ * The claim can never exceed what the day's punches computed — `computedMinutes`
+ * is copied from the attendance day when the claim is made, and the rule's cap
+ * applies on top. The multiplier is copied too, so changing a rate later does
+ * not reprice claims already decided. One live claim (pending or approved) per
+ * person per day is a partial unique index.
+ */
+export const overtimeClaims = pgTable(
+  "overtime_claims",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    reference: text("reference").notNull(),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    date: date("date").notNull(),
+    dateBs: text("date_bs").notNull(),
+    dayKind: overtimeDayKind("day_kind").notNull(),
+    computedMinutes: integer("computed_minutes").notNull(),
+    claimedMinutes: integer("claimed_minutes").notNull(),
+    approvedMinutes: integer("approved_minutes"),
+    multiplier: numeric("multiplier", { precision: 4, scale: 2 }).notNull(),
+    /** approvedMinutes × multiplier, rounded — what payroll pays for. */
+    payableMinutes: integer("payable_minutes"),
+    reason: text("reason").notNull(),
+    status: overtimeClaimStatus("status").notNull().default("pending"),
+    /** The supervisor it was routed to when submitted. */
+    approverEmployeeId: uuid("approver_employee_id").references(() => employees.id, { onDelete: "set null" }),
+    decidedByUserId: text("decided_by_user_id"),
+    decidedByLabel: text("decided_by_label"),
+    decidedAt: timestamp("decided_at"),
+    decisionNote: text("decision_note"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("overtime_claims_org_reference_key").on(t.orgId, t.reference),
+    uniqueIndex("overtime_claims_live_key").on(t.employeeId, t.date).where(sql`status in ('pending', 'approved')`),
+    index("overtime_claims_org_status_idx").on(t.orgId, t.status, t.date),
+    index("overtime_claims_approver_idx").on(t.approverEmployeeId, t.status),
+    index("overtime_claims_employee_idx").on(t.employeeId, t.date),
+  ],
+);

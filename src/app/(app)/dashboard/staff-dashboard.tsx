@@ -26,6 +26,7 @@ import {
   Th,
   Tr,
 } from "@/components/ui";
+import { CalendarCard } from "./calendar-card";
 
 /**
  * What an employee sees.
@@ -270,6 +271,8 @@ export async function StaffDashboard({ viewer }: { viewer: Viewer }) {
         </div>
 
         <div className="flex flex-col gap-4">
+          <CalendarCard orgId={viewer.orgId} employeeId={viewer.employeeId} />
+
           <Card>
             <CardHeader
               title="My balances"
