@@ -1,10 +1,21 @@
 import { notFound } from "next/navigation";
 import { requirePermission, can } from "@/lib/session";
-import { PageHeader, Badge } from "@/components/ui";
-import { listUnits, usageCounts } from "@/modules/org/structure";
+import { PageHeader } from "@/components/ui";
+import { listUnitRows, unitsWithChildren, usageCounts, type GenericKind } from "@/modules/org/structure";
 import type { OrgUnitKind } from "@/kernel/ports";
-import { ActiveBadge, MasterTable, buildTree, indentOf } from "../../page-parts";
-import { RetireButton, UnitForm, type KindConfig } from "./forms";
+import { ActiveBadge, buildTree, deactivateBlockedReason, indentOf, subtreeIds } from "../../page-parts";
+import { MasterEditor, type EditorRow, type FieldDef } from "../../master-editor";
+
+type KindConfig = {
+  kind: string;
+  /** Route segment, so a save revalidates the page it came from. */
+  slug: string;
+  singular: string;
+  parentLabel: string | null;
+  parentRequired: boolean;
+  showDates: boolean;
+  showGeography: boolean;
+};
 
 /**
  * Six legacy screens, one route.
@@ -118,75 +129,133 @@ export default async function StructureKindPage({ params }: RouteParams) {
   // "there is no data here".
   if (!def) notFound();
 
-  const [rows, parents, usage] = await Promise.all([
-    listUnits(viewer.orgId, def.kind as OrgUnitKind),
-    def.parentKind ? listUnits(viewer.orgId, def.parentKind) : Promise.resolve([]),
+  const unitKind = def.kind as GenericKind;
+  const [rows, parents, usage, withChildren] = await Promise.all([
+    listUnitRows(viewer.orgId, unitKind),
+    def.parentKind ? listUnitRows(viewer.orgId, def.parentKind as GenericKind) : Promise.resolve([]),
     usageCounts(viewer.orgId, def.kind as OrgUnitKind),
+    unitsWithChildren(viewer.orgId),
   ]);
 
   const tree = buildTree(rows);
-  const mayManage = can(viewer, "setup.structure.manage");
+  const parentById = new Map(parents.map((p) => [p.id, p]));
+  // locations nest into locations, so the parent list is the same list
+  const sameKindParent = def.parentKind === def.kind;
+
+  const fields: FieldDef[] = [
+    { name: "code", label: "Code", kind: "text", required: true, maxLength: 20, mono: true },
+    { name: "name", label: "Name", kind: "text", required: true, maxLength: 120 },
+    { name: "nameNepali", label: "Name (Nepali)", kind: "text", maxLength: 120, wide: true },
+    ...(def.parentLabel
+      ? [
+          {
+            name: "parentId",
+            label: def.parentLabel,
+            kind: "select" as const,
+            required: def.parentRequired,
+            emptyLabel: def.parentRequired ? "Select…" : "None — top level",
+            excludeTree: sameKindParent,
+            wide: true,
+            hint:
+              parents.filter((p) => p.isActive).length === 0
+                ? `Add a ${def.parentLabel.toLowerCase()} first.`
+                : def.parentRequired
+                  ? `Must sit under a ${def.parentLabel.toLowerCase()}; anything else is refused.`
+                  : undefined,
+            options: parents.filter((p) => p.isActive).map((p) => ({ value: p.id, label: `${p.code} · ${p.name}` })),
+          },
+        ]
+      : []),
+    ...(def.showDates
+      ? [
+          { name: "startDate", label: "Start date", kind: "date" as const },
+          { name: "endDate", label: "End date", kind: "date" as const },
+        ]
+      : []),
+    ...(def.showGeography
+      ? [
+          { name: "country", label: "Country", kind: "text" as const, maxLength: 80 },
+          { name: "state", label: "Province / State", kind: "text" as const, maxLength: 80 },
+        ]
+      : []),
+    { name: "sortOrder", label: "Sort order", kind: "number", min: 0, max: 9999, hint: "Lower appears first." },
+    { name: "remarks", label: "Remarks", kind: "textarea", maxLength: 500, wide: true },
+  ];
+
+  const editorRows: EditorRow[] = tree.map(({ row: r, depth }) => {
+    const staff = usage.get(r.id) ?? 0;
+    const activeChildren = rows.filter((c) => c.parentId === r.id && c.isActive).length;
+    const parent = r.parentId ? (parentById.get(r.parentId) ?? rows.find((x) => x.id === r.parentId)) : null;
+    return {
+      id: r.id,
+      code: r.code,
+      isActive: r.isActive,
+      search: [r.code, r.name, r.nameNepali, parent?.name].filter(Boolean).join(" ").toLowerCase(),
+      tree: sameKindParent ? subtreeIds(rows, r.id) : [r.id],
+      deleteBlocked:
+        staff > 0
+          ? `${staff} employee${staff === 1 ? "" : "s"} placed here. Deactivate instead.`
+          : withChildren.has(r.id)
+            ? "Units sit underneath this one. Deactivate instead."
+            : null,
+      deactivateBlocked: deactivateBlockedReason(staff, activeChildren, "unit"),
+      values: {
+        code: r.code,
+        name: r.name,
+        nameNepali: r.nameNepali,
+        parentId: r.parentId,
+        startDate: r.startDate,
+        endDate: r.endDate,
+        country: r.country,
+        state: r.state,
+        sortOrder: r.sortOrder,
+        remarks: r.remarks,
+      },
+      cells: [
+        <span key="c" className="font-mono text-xs text-ink-soft">{r.code}</span>,
+        <span key="n" style={indentOf(depth)} className="flex items-center gap-2">
+          {depth > 0 ? <span className="text-ink-faint">└</span> : null}
+          <span>
+            <span className="font-medium text-ink">{r.name}</span>
+            {r.nameNepali ? <span className="block text-[11px] text-ink-faint">{r.nameNepali}</span> : null}
+          </span>
+        </span>,
+        ...(def.parentLabel && !sameKindParent
+          ? [<span key="p" className="text-xs text-ink-soft">{parent ? parent.name : "—"}</span>]
+          : []),
+        ...(def.showDates
+          ? [
+              <span key="d" className="tabular text-xs text-ink-soft">
+                {r.startDate ?? "—"} → {r.endDate ?? "open"}
+              </span>,
+            ]
+          : []),
+        <span key="s" className="tabular">{staff}</span>,
+        <ActiveBadge key="a" active={r.isActive} />,
+      ],
+    };
+  });
 
   return (
     <>
       <PageHeader title={def.title} description={def.description} />
-
-      {mayManage ? (
-        <div className="mb-5">
-          <UnitForm
-            config={def}
-            parents={parents
-              .filter((p) => p.isActive)
-              .map((p) => ({ id: p.id, label: `${p.code} · ${p.name}` }))}
-          />
-        </div>
-      ) : null}
-
-      <MasterTable
-        rows={tree.map((t) => ({ ...t.row, __depth: t.depth }))}
-        empty={`No ${def.title.toLowerCase()} defined yet`}
+      <MasterEditor
+        kind={def.kind}
+        noun={def.singular}
+        plural={def.title.toLowerCase()}
+        path={`/setup/structure/${def.slug}`}
+        canManage={can(viewer, "setup.structure.manage")}
         columns={[
-          {
-            header: "Code",
-            cell: (r) => <span className="font-mono text-xs text-ink-soft">{r.code}</span>,
-          },
-          {
-            header: "Name",
-            cell: (r) => (
-              <span style={indentOf(r.__depth)} className="flex items-center gap-2">
-                {r.__depth > 0 ? <span className="text-ink-faint">└</span> : null}
-                <span className="font-medium text-ink">{r.name}</span>
-              </span>
-            ),
-          },
-          {
-            header: "Staff",
-            align: "right",
-            cell: (r) => {
-              const n = usage.get(r.id) ?? 0;
-              return n === 0 ? (
-                <span className="text-ink-faint">—</span>
-              ) : (
-                <Badge tone="neutral">{n}</Badge>
-              );
-            },
-          },
-          { header: "Status", cell: (r) => <ActiveBadge active={r.isActive} /> },
-          ...(mayManage
-            ? [
-                {
-                  header: "",
-                  align: "right" as const,
-                  cell: (r: (typeof tree)[number]["row"] & { __depth: number }) =>
-                    r.isActive ? (
-                      <RetireButton id={r.id} kind={def.kind} slug={def.slug} inUse={usage.get(r.id) ?? 0} />
-                    ) : (
-                      <span className="text-xs text-ink-faint">—</span>
-                    ),
-                },
-              ]
-            : []),
+          { header: "Code" },
+          { header: "Name" },
+          ...(def.parentLabel && !sameKindParent ? [{ header: def.parentLabel }] : []),
+          ...(def.showDates ? [{ header: "Runs" }] : []),
+          { header: "Staff", align: "right" as const },
+          { header: "Status" },
         ]}
+        rows={editorRows}
+        fields={fields}
+        defaults={{ sortOrder: 0, country: def.showGeography ? "Nepal" : null }}
       />
     </>
   );

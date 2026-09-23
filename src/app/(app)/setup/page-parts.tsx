@@ -87,3 +87,33 @@ export function buildTree<T extends { id: string; parentId: string | null }>(
   }
   return out;
 }
+
+/**
+ * A row and everything beneath it — the ids a parent picker must not offer,
+ * because choosing one would put the row inside itself.
+ */
+export function subtreeIds<T extends { id: string; parentId: string | null }>(rows: T[], id: string): string[] {
+  const children = new Map<string, string[]>();
+  for (const r of rows) if (r.parentId) children.set(r.parentId, [...(children.get(r.parentId) ?? []), r.id]);
+  const out: string[] = [];
+  const stack = [id];
+  while (stack.length && out.length <= rows.length) {
+    const next = stack.pop()!;
+    out.push(next);
+    stack.push(...(children.get(next) ?? []));
+  }
+  return out;
+}
+
+/** The tooltip on a disabled delete button: what still refers to the record. */
+export function deleteBlockedReason(usage: { references: number; summary: string[] } | undefined): string | null {
+  if (!usage || usage.references === 0) return null;
+  return `In use — ${usage.summary.join(", ")}. Deactivate instead.`;
+}
+
+/** The tooltip on a disabled deactivate button. */
+export function deactivateBlockedReason(staff: number, activeChildren = 0, childNoun = "child"): string | null {
+  if (staff > 0) return `${staff} current ${staff === 1 ? "employee is" : "employees are"} placed here — move them first`;
+  if (activeChildren > 0) return `${activeChildren} active ${childNoun}${activeChildren === 1 ? "" : "s"} underneath — deactivate those first`;
+  return null;
+}

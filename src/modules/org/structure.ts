@@ -4,7 +4,8 @@ import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { branches, departments } from "@/db/schema/org";
 import { orgUnits, type orgUnitKind } from "@/db/schema/org-structure";
-import { employees } from "@/db/schema/hr";
+import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import type { PgColumn } from "drizzle-orm/pg-core";
 import { publish, type Tx } from "@/kernel/events";
 import type { OrgUnit, OrgUnitKind } from "@/kernel/ports";
 
@@ -123,7 +124,10 @@ export async function updateUnit(
         state: input.state ?? null,
         sortOrder: input.sortOrder ?? 0,
         remarks: input.remarks ?? null,
-        isActive: input.isActive ?? true,
+        // An edit leaves the active flag alone unless it was asked to change —
+        // defaulting it to true here would quietly reactivate a retired unit
+        // every time somebody corrected its name.
+        ...(input.isActive === undefined ? {} : { isActive: input.isActive }),
       })
       .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, input.orgId)));
 
@@ -381,4 +385,130 @@ export async function unitsInUse(orgId: string, ids: string[]): Promise<Set<stri
     for (const value of Object.values(row)) if (value) used.add(value);
   }
   return used;
+}
+
+/* -------------------------------------------------- editing and retiring */
+
+/** The employee column that places somebody in a unit of each kind, if any. */
+const UNIT_EMPLOYEE_COLUMN: Partial<Record<GenericKind, PgColumn>> = {
+  division: employees.divisionId,
+  business_unit: employees.businessUnitId,
+  functional_category: employees.functionalCategoryId,
+  project: employees.projectId,
+  location: employees.locationId,
+};
+
+/** Every column of a kind's units, for an edit form to prefill from. */
+export async function listUnitRows(orgId: string, kind: GenericKind) {
+  return db
+    .select()
+    .from(orgUnits)
+    .where(and(eq(orgUnits.orgId, orgId), eq(orgUnits.kind, kind)))
+    .orderBy(asc(orgUnits.sortOrder), asc(orgUnits.code));
+}
+
+/** Units with children, so the screen knows which ones cannot be deleted. */
+export async function unitsWithChildren(orgId: string): Promise<Set<string>> {
+  const rows = await db
+    .selectDistinct({ parentId: orgUnits.parentId })
+    .from(orgUnits)
+    .where(and(eq(orgUnits.orgId, orgId), ne(orgUnits.parentId, sql`NULL`)));
+  return new Set(rows.map((r) => r.parentId).filter((v): v is string => !!v));
+}
+
+/**
+ * Activates or deactivates. Deactivating refuses while active units sit
+ * underneath or current staff are placed in it; reactivating refuses under a
+ * parent that is itself switched off.
+ */
+export async function setUnitActive(orgId: string, id: string, active: boolean): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [unit] = await tx
+      .select({ kind: orgUnits.kind, parentId: orgUnits.parentId })
+      .from(orgUnits)
+      .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId)))
+      .limit(1);
+    if (!unit) throw new StructureError("That unit no longer exists.");
+
+    if (!active) {
+      const children = await tx
+        .select({ id: orgUnits.id })
+        .from(orgUnits)
+        .where(and(eq(orgUnits.parentId, id), eq(orgUnits.isActive, true)))
+        .limit(1);
+      if (children.length > 0) throw new StructureError("Deactivate the units underneath this one first.");
+
+      const column = UNIT_EMPLOYEE_COLUMN[unit.kind];
+      if (column) {
+        const [{ n }] = await tx
+          .select({ n: sql<number>`count(*)::int` })
+          .from(employees)
+          .where(
+            and(
+              eq(column, id),
+              inArray(employees.status, [...EMPLOYED_STATUSES]),
+            ),
+          );
+        if (n > 0) {
+          throw new StructureError(
+            `${n} current ${n === 1 ? "employee is" : "employees are"} still placed in this ${label(unit.kind)}. Move them first.`,
+          );
+        }
+      }
+    } else if (unit.parentId) {
+      const [parent] = await tx
+        .select({ isActive: orgUnits.isActive })
+        .from(orgUnits)
+        .where(eq(orgUnits.id, unit.parentId))
+        .limit(1);
+      if (parent && !parent.isActive) throw new StructureError("Its parent is inactive. Reactivate the parent first.");
+    }
+
+    await tx.update(orgUnits).set({ isActive: active }).where(eq(orgUnits.id, id));
+    await publish(tx, {
+      orgId,
+      module: "org",
+      name: "org.structure.changed",
+      payload: { unitId: id, action: active ? "reactivated" : "deactivated" },
+    });
+  });
+}
+
+/** Deletes a unit that nothing — no employee, past or present, and no child — points at. */
+export async function deleteUnit(orgId: string, id: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const [child] = await tx.select({ id: orgUnits.id }).from(orgUnits).where(eq(orgUnits.parentId, id)).limit(1);
+    if (child) throw new StructureError("Units sit underneath this one. Deactivate it instead.");
+
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(employees)
+      .where(
+        or(
+          eq(employees.divisionId, id),
+          eq(employees.businessUnitId, id),
+          eq(employees.functionalCategoryId, id),
+          eq(employees.projectId, id),
+          eq(employees.locationId, id),
+        ),
+      );
+    if (n > 0) {
+      throw new StructureError(
+        `${n} employee ${n === 1 ? "record points" : "records point"} at this unit. Deactivate it instead — history keeps its meaning.`,
+      );
+    }
+
+    const deleted = await tx
+      .delete(orgUnits)
+      .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId)))
+      .returning({ id: orgUnits.id });
+    if (deleted.length === 0) throw new StructureError("That unit no longer exists.");
+
+    await publish(tx, {
+      orgId,
+      module: "org",
+      name: "org.structure.changed",
+      payload: { unitId: id, action: "deleted" },
+    });
+  });
 }

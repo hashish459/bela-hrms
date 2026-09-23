@@ -371,3 +371,169 @@ export function SparkColumns({
     </div>
   );
 }
+
+/* ------------------------------------------------ stacked column chart */
+
+export type ColumnDatum = {
+  label: string;
+  /** Tooltip heading — the full date or period the column covers. */
+  title?: string;
+  segments: { key: string; value: number }[];
+  /** Drawn faint: a weekly off or holiday, where low figures are expected. */
+  muted?: boolean;
+  /** A figure printed above the column, such as the attendance rate. */
+  caption?: string;
+};
+
+/**
+ * Vertical stacked columns over time. Use when the question is "how did this
+ * change across the period" and each column is made of the same parts —
+ * attendance mix per day of a month.
+ *
+ * Normalised to 100% by default because headcount varies across a period (new
+ * joiners, weekly offs) and a raw column would show headcount, not attendance.
+ * Every column is labelled only when there is room; otherwise every nth one is,
+ * which keeps the axis readable at a month of dailies.
+ */
+export function StackedColumnChart({
+  columns,
+  keys,
+  height = 160,
+  absolute = false,
+  className,
+}: {
+  columns: ColumnDatum[];
+  keys: { key: string; label: string; colour: string }[];
+  height?: number;
+  absolute?: boolean;
+  className?: string;
+}) {
+  const totals = columns.map((c) => c.segments.reduce((sum, s) => sum + s.value, 0));
+  const max = Math.max(1, ...totals);
+  const labelEvery = columns.length <= 16 ? 1 : Math.ceil(columns.length / 12);
+  const colourOf = new Map(keys.map((k) => [k.key, k.colour]));
+  const labelOf = new Map(keys.map((k) => [k.key, k.label]));
+
+  return (
+    <div className={cn("flex flex-col gap-3", className)}>
+      <ul className="flex flex-wrap gap-x-4 gap-y-1">
+        {keys.map((k) => (
+          <li key={k.key} className="flex items-center gap-1.5 text-[11px] text-ink-soft">
+            <span className="size-2.5 rounded-sm" style={{ background: k.colour }} aria-hidden />
+            {k.label}
+          </li>
+        ))}
+      </ul>
+
+      <div className="flex items-end gap-[3px]" style={{ height: height + 16 }}>
+        {columns.map((col, i) => {
+          const sum = totals[i];
+          const heightPx = absolute ? (sum / max) * height : sum > 0 ? height : 0;
+          const tooltip = [
+            col.title ?? col.label,
+            ...col.segments
+              .filter((s) => s.value > 0)
+              .map((s) => `${labelOf.get(s.key) ?? s.key}: ${s.value}`),
+            col.caption,
+          ]
+            .filter(Boolean)
+            .join("\n");
+
+          return (
+            <div key={`${col.label}-${i}`} className="flex min-w-1 flex-1 flex-col items-stretch">
+              <span className="tabular h-4 truncate text-center text-[9px] leading-4 text-ink-faint">
+                {i % labelEvery === 0 && col.caption && !col.muted ? col.caption : ""}
+              </span>
+              <div
+                className={cn(
+                  "flex flex-col-reverse overflow-hidden rounded-t-[2px]",
+                  col.muted && "opacity-35",
+                )}
+                style={{ height: Math.max(sum > 0 ? 2 : 0, heightPx) }}
+                title={tooltip}
+                role="img"
+                aria-label={tooltip.replace(/\n/g, ", ")}
+              >
+                {col.segments
+                  .filter((s) => s.value > 0)
+                  .map((s) => (
+                    <span
+                      key={s.key}
+                      style={{
+                        height: `${pct(s.value, sum)}%`,
+                        background: colourOf.get(s.key) ?? "var(--color-line)",
+                      }}
+                    />
+                  ))}
+              </div>
+              {sum === 0 ? (
+                <div
+                  className="rounded-t-[2px] bg-sunk"
+                  style={{ height: col.muted ? 4 : 2 }}
+                  title={tooltip}
+                />
+              ) : null}
+            </div>
+          );
+        })}
+      </div>
+
+      <div className="-mt-2 flex gap-[3px]" aria-hidden>
+        {columns.map((col, i) => (
+          <span
+            key={`${col.label}-${i}`}
+            className={cn(
+              "tabular min-w-1 flex-1 truncate text-center text-[10px]",
+              col.muted ? "text-ink-faint/70" : "text-ink-faint",
+            )}
+          >
+            {i % labelEvery === 0 ? col.label : ""}
+          </span>
+        ))}
+      </div>
+    </div>
+  );
+}
+
+/* ------------------------------------------------------------ bar list */
+
+/**
+ * A ranked list with a proportional bar behind each value — "who has the most
+ * overtime", "which weekday people are late on". A table with a sense of scale.
+ */
+export function BarList({
+  items,
+  colour = "var(--color-accent)",
+  empty = "Nothing to show",
+}: {
+  items: { label: ReactNode; value: number; display?: ReactNode; hint?: ReactNode; key?: string }[];
+  colour?: string;
+  empty?: string;
+}) {
+  const max = Math.max(1, ...items.map((i) => i.value));
+  if (items.length === 0) return <p className="py-6 text-center text-xs text-ink-faint">{empty}</p>;
+
+  return (
+    <ul className="flex flex-col gap-1.5">
+      {items.map((item, i) => (
+        <li key={item.key ?? i} className="relative overflow-hidden rounded-sm">
+          <span
+            className="absolute inset-y-0 left-0 rounded-sm opacity-15"
+            style={{ width: `${pct(item.value, max)}%`, background: colour }}
+            aria-hidden
+          />
+          <span
+            className="absolute inset-y-0 left-0 w-0.5 rounded-sm"
+            style={{ background: colour, opacity: item.value > 0 ? 1 : 0 }}
+            aria-hidden
+          />
+          <span className="relative flex items-baseline gap-2 px-2 py-1 text-xs">
+            <span className="min-w-0 flex-1 truncate text-ink">{item.label}</span>
+            {item.hint ? <span className="shrink-0 text-[11px] text-ink-faint">{item.hint}</span> : null}
+            <span className="tabular shrink-0 font-medium text-ink">{item.display ?? item.value}</span>
+          </span>
+        </li>
+      ))}
+    </ul>
+  );
+}

@@ -49,8 +49,8 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | Module | Status | Screens |
 |---|---|---|
 | **Employees** | 2 of 7 built | Employees, Reporting Lines · *documents, confirmations, transfers, separations, recruitment planned* |
-| **Attendance** | 7 of 10 built | My Attendance, Daily Register, Monthly Sheet, My Requests, Approvals, Shift Master, Shift Assignment · *overtime, devices, reports planned* |
-| **Leave** | 7 of 9 built | My Leave, Approvals, Register, Calendar, Balances, Types, Policy · *encashment, lapse planned* |
+| **Attendance** | 9 of 10 built | My Attendance, Daily Register, Monthly Sheet, My Requests, Approvals, Shift Master, Shift Assignment, Devices, Reports (overview, muster roll, late & early exit, absenteeism with Bradford factor, overtime, exceptions, departments — CSV export and print) · *overtime claims planned* |
+| **Leave** | 8 of 10 built | My Leave, Approvals, Register, Calendar, Reports (overview, balances with lapse risk, by leave type, leave history, approval turnaround, departments — CSV export and print), Balances, Types, Policy · *encashment, lapse planned* |
 | **Payroll** | planned | Salary heads and structure, monthly run, payslips, TDS, SSF/PF, bank advice |
 | **Appraisal** | planned | KRA/KPI, rating scales, cycles, self appraisal, reviews, results |
 | **Training** | planned | Programmes, calendar, nominations, session attendance, effectiveness |
@@ -59,7 +59,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | **Procurement** | planned | Purchase requests, quotations, orders, goods receipt, vendors |
 | **Inventory** | planned | Items, groups, stores, requests, issue and return, stock ledger |
 | **Fixed Assets** | planned | Register, groups, allocation, maintenance, depreciation, disposal |
-| **Organisation** | 5 of 7 built | Branches, Departments, Designations, Fiscal Years, Holidays · *grades, company profile planned* |
+| **Organisation** | 14 of 14 built | Company Profile, Branches, Departments & sections, Designations, Grades, Employment Types, Divisions, Business Units, Sub Business Units, Functional Categories, Projects, Locations, Fiscal Years, Holidays — every master editable (add, edit, deactivate, reactivate, delete when unreferenced), audited field by field |
 | **Administration** | 4 of 5 built | Users, Roles, Audit Trail, Appearance · *notifications planned* |
 | **Documentation** | 7 of 7 built | Getting Started, User Manual, FAQ, Architecture, Data Model, Workflows, Roadmap |
 
