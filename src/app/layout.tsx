@@ -3,6 +3,7 @@ import { IBM_Plex_Mono, IBM_Plex_Sans, IBM_Plex_Serif } from "next/font/google";
 import "./globals.css";
 import { APP } from "@/lib/branding";
 import { APPEARANCE_BOOTSTRAP } from "@/lib/appearance";
+import { InlineScript } from "@/components/inline-script";
 
 const plexSans = IBM_Plex_Sans({
   variable: "--font-plex-sans",
@@ -43,7 +44,7 @@ export default function RootLayout({ children }: LayoutProps<"/">) {
     >
       <head>
         {/* applies saved appearance before first paint — no flash of the wrong theme */}
-        <script dangerouslySetInnerHTML={{ __html: APPEARANCE_BOOTSTRAP }} />
+        <InlineScript html={APPEARANCE_BOOTSTRAP} />
       </head>
       <body className="min-h-full">{children}</body>
     </html>
