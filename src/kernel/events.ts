@@ -27,11 +27,16 @@ export type Tx = Parameters<Parameters<Db["transaction"]>[0]>[0];
 
 /** Events the system publishes. Adding one is a type change, not a string. */
 export type DomainEventName =
+  | "leave.request.submitted"
+  | "leave.request.forwarded"
   | "leave.request.approved"
   | "leave.request.rejected"
   | "leave.request.withdrawn"
   | "attendance.day.recalculated"
+  | "attendance.request.submitted"
+  | "attendance.request.forwarded"
   | "attendance.request.approved"
+  | "attendance.request.rejected"
   | "org.structure.changed"
   | "calendar.holiday.changed"
   | "period.locked"

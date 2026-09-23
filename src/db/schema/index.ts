@@ -12,3 +12,4 @@ export * from "./attendance";
 export * from "./devices";
 export * from "./selfservice";
 export * from "./kernel";
+export * from "./notifications";

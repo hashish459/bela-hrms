@@ -92,6 +92,8 @@ export const MODULES: ModuleDefinition[] = [
         "Your record, service history, family, qualifications and documents."),
       ready("self.calendar", "My Calendar", "/me/calendar", "CalendarRange", "self.desk.view", "Me",
         "Your Bikram Sambat month, with a request one click from any day."),
+      ready("self.notifications", "Notifications", "/me/notifications", "Bell", "self.desk.view", "Me",
+        "Everything waiting on you and every decision on your own requests, with your delivery preferences."),
       ready("self.notices", "Notices", "/me/notices", "Megaphone", "self.notice.read", "Workplace"),
       ready("self.directory", "Staff Directory", "/me/directory", "Contact", "self.directory.view", "Workplace"),
     ],
@@ -471,6 +473,7 @@ export const MODULES: ModuleDefinition[] = [
       { key: "admin.role.manage", label: "Manage roles and permissions" },
       { key: "admin.audit.view", label: "View the audit trail" },
       { key: "admin.settings.manage", label: "Manage system settings" },
+      { key: "admin.notifications.manage", label: "Manage notifications and send announcements" },
       { key: "admin.settings.appearance", label: "Change own appearance settings" },
     ],
     nav: [
@@ -481,8 +484,8 @@ export const MODULES: ModuleDefinition[] = [
         "What is installed, what it depends on, and what is currently working."),
       ready("admin.settings", "Appearance", "/admin/settings", "Palette", "admin.settings.appearance", "Preferences",
         "Theme, typeface, text size, density and accent — personal to each person and their browser."),
-      planned("admin.notifications", "Notifications", "/admin/notifications", "Bell", "admin.settings.manage", "Oversight",
-        "Email and in-app templates, and which events send them."),
+      ready("admin.notifications", "Notifications", "/admin/notifications", "BellRing", "admin.notifications.manage", "Oversight",
+        "Which events notify whom, by which channel and in what words; announcements; and the delivery log."),
     ],
   },
 

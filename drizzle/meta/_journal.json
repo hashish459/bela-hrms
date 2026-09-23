@@ -64,6 +64,13 @@
       "when": 1789885933883,
       "tag": "0008_tearful_blacklash",
       "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "7",
+      "when": 1790142975314,
+      "tag": "0009_pretty_black_queen",
+      "breakpoints": true
     }
   ]
 }

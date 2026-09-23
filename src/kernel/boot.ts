@@ -21,6 +21,7 @@ import "@/modules/org/module";
 import "@/modules/attendance/module";
 import "@/modules/leave/module";
 import "@/modules/payroll/module";
+import "@/modules/notifications/module";
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";

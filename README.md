@@ -60,7 +60,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | **Inventory** | planned | Items, groups, stores, requests, issue and return, stock ledger |
 | **Fixed Assets** | planned | Register, groups, allocation, maintenance, depreciation, disposal |
 | **Organisation** | 14 of 14 built | Company Profile, Branches, Departments & sections, Designations, Grades, Employment Types, Divisions, Business Units, Sub Business Units, Functional Categories, Projects, Locations, Fiscal Years, Holidays — every master editable (add, edit, deactivate, reactivate, delete when unreferenced), audited field by field |
-| **Administration** | 4 of 5 built | Users, Roles, Audit Trail, Appearance · *notifications planned* |
+| **Administration** | 5 of 5 built | Users, Roles, Audit Trail, Appearance, Notifications (rules per event — on/off, in-app and email channels, recipients, thresholds, wording with live preview and test send; announcements to everyone, a branch, department or role; delivery log and email outbox; volume overview) |
 | **Documentation** | 7 of 7 built | Getting Started, User Manual, FAQ, Architecture, Data Model, Workflows, Roadmap |
 
 A planned screen is a real route. It renders what it will do, which permission guards
@@ -587,6 +587,27 @@ day in it is stamped locked.
 Both seeds are idempotent, and the history seed never touches the current year.
 
 ---
+
+## Notifications
+
+Leave and attendance publish domain events; the **notifications** module subscribes and
+turns each into a catalogue entry ([`catalogue.ts`](src/modules/notifications/catalogue.ts)),
+so a notification fault delays a message and never rolls back the approval behind it.
+Every user gets a header bell (polls every minute and on focus), an inbox at
+**My Desk › Notifications** with per-category in-app/email preferences, and never a
+notification about their own action. Administrators tune each rule at
+**Administration › Notifications**. Reminders (approvals waiting, documents expiring,
+probation ending) are swept at most every 30 minutes per organisation and deduplicated.
+
+| Variable | |
+|---|---|
+| `NOTIFY_EMAIL_TRANSPORT` | `webhook`, `log` (default in development — written to the server log) or `none` (default in production) |
+| `NOTIFY_EMAIL_WEBHOOK_URL` / `_TOKEN` | Receives `POST {to, from, subject, text}` with `Authorization: Bearer <token>` — point it at your mail relay |
+| `NOTIFY_EMAIL_FROM` | Sender address passed to the webhook |
+| `CRON_SECRET` | Enables `GET`/`POST /api/cron/notifications` (Bearer auth): drains events, sweeps reminders for every organisation, flushes the email queue. Schedule it every 5–15 minutes in production |
+
+Email is an outbox: failed sends retry with backoff up to five attempts, visible in the
+delivery log.
 
 ## Deployment
 
