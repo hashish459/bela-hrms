@@ -13,3 +13,4 @@ export * from "./devices";
 export * from "./selfservice";
 export * from "./kernel";
 export * from "./notifications";
+export * from "./workbook";

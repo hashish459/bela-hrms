@@ -7,6 +7,8 @@ import { saveEmployee, type EmployeeFormState } from "./actions";
 import { Button, Card, CardHeader, Field, Input, Select, Textarea } from "@/components/ui";
 import { BsDateField } from "@/components/bs-date-field";
 import { BLOOD_GROUPS } from "@/modules/people/profile-fields";
+import { PhotoUpload } from "./[id]/photo-upload";
+import { PhotoPicker } from "./photo-picker";
 
 export type Option = { id: string; name: string };
 
@@ -54,6 +56,8 @@ export type EmployeeDefaults = Partial<{
   bankName: string | null;
   bankAccountNumber: string | null;
   basicSalary: string | null;
+  photoFileId: string | null;
+  photoUrl: string | null;
 }>;
 
 const initial: EmployeeFormState = { ok: false };
@@ -107,8 +111,26 @@ export function EmployeeForm({
       ) : null}
 
       <Card>
-        <CardHeader title="Identity" />
-        <div className="grid gap-4 p-4 sm:grid-cols-2 lg:grid-cols-3">
+        <CardHeader
+          title="Identity"
+          description={employeeId ? "The photograph saves as soon as you choose it." : "The photograph is saved with the new record."}
+        />
+        <div className="flex flex-col gap-4 p-4 md:flex-row">
+          <div className="flex shrink-0 justify-center md:w-36 md:border-r md:border-line-soft md:pr-4">
+            {employeeId ? (
+              <PhotoUpload
+                employeeId={employeeId}
+                photoId={employee?.photoFileId ?? null}
+                photoUrl={employee?.photoUrl ?? null}
+                firstName={employee?.firstName ?? ""}
+                lastName={employee?.lastName ?? ""}
+                canEdit
+              />
+            ) : (
+              <PhotoPicker error={err("photo")} />
+            )}
+          </div>
+        <div className="grid flex-1 gap-4 sm:grid-cols-2 lg:grid-cols-3">
           <Field label="Employee code" required error={err("employeeCode")}>
             <Input
               name="employeeCode"
@@ -171,6 +193,7 @@ export function EmployeeForm({
           <Field label="Religion" error={err("religion")}>
             <Input name="religion" defaultValue={employee?.religion ?? ""} />
           </Field>
+        </div>
         </div>
       </Card>
 

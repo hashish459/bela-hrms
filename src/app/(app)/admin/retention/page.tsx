@@ -2,7 +2,9 @@ import { requirePermission } from "@/lib/session";
 import { adToBs, formatBs } from "@/lib/bs";
 import { Badge, Card, CardHeader, PageHeader, StatTile, TableShell, Td, Th, Tr } from "@/components/ui";
 import { databaseHealth, policiesFor } from "@/lib/retention";
+import { DIAGNOSTICS, serverInfo } from "@/lib/db-console";
 import { OptimiseButton, PolicyRow } from "./policy-row";
+import { Diagnostics } from "./diagnostics";
 
 export const metadata = { title: "Data Retention" };
 
@@ -21,6 +23,15 @@ function bytes(n: number): string {
 const bs = (d: Date | null) => (d ? formatBs(adToBs(d.toISOString().slice(0, 10))) : "—");
 const n = (v: number) => v.toLocaleString("en-IN");
 
+function duration(seconds: number) {
+  const d = Math.floor(seconds / 86_400);
+  const h = Math.floor((seconds % 86_400) / 3_600);
+  const m = Math.floor((seconds % 3_600) / 60);
+  return d ? `${d}d ${h}h` : h ? `${h}h ${m}m` : `${m}m`;
+}
+
+const ms = (v: number) => `${v < 10 ? v.toFixed(1) : Math.round(v)} ms`;
+
 /**
  * What the system keeps, for how long, and how big it has got.
  *
@@ -30,7 +41,8 @@ const n = (v: number) => v.toLocaleString("en-IN");
  */
 export default async function RetentionPage() {
   const viewer = await requirePermission("admin.retention.manage");
-  const [policies, health] = await Promise.all([policiesFor(viewer.orgId), databaseHealth()]);
+  const [policies, health, server] = await Promise.all([policiesFor(viewer.orgId), databaseHealth(), serverInfo()]);
+  const latencyTone = server.latency.medianMs < 5 ? "ok" : server.latency.medianMs < 25 ? "warn" : "danger";
 
   const clearable = policies.reduce((sum, p) => sum + p.eligible, 0);
   const automatic = policies.filter((p) => p.isAutomatic && p.retentionDays !== null).length;
@@ -49,6 +61,73 @@ export default async function RetentionPage() {
         <StatTile label="Cleared automatically" value={`${automatic} of ${policies.length}`} sub="datasets on the daily run" />
         <StatTile label="Dead rows" value={n(dead)} sub="space a VACUUM can reuse" tone={dead > 50_000 ? "warn" : "neutral"} />
       </div>
+
+      <Card className="mb-4">
+        <CardHeader
+          title="Database server"
+          description={server.versionFull}
+          action={
+            <span className="flex items-center gap-1.5 text-xs text-ok">
+              <span className="relative flex size-2">
+                <span className="absolute inline-flex size-full animate-ping rounded-full bg-ok opacity-60" />
+                <span className="relative inline-flex size-2 rounded-full bg-ok" />
+              </span>
+              {server.replica ? "Online · read replica" : "Online · primary"}
+            </span>
+          }
+        />
+        <div className="grid gap-3 p-4 sm:grid-cols-2 lg:grid-cols-4">
+          <StatTile label="Round-trip latency" value={ms(server.latency.medianMs)} sub={`best ${ms(server.latency.bestMs)} · first ${ms(server.latency.firstMs)}`} tone={latencyTone} />
+          <StatTile
+            label="Connections"
+            value={`${server.connections}/${server.maxConnections}`}
+            sub={`${server.activeConnections} active · app pool ${server.pool.total}/${server.pool.max} (${server.pool.idle} idle${server.pool.waiting ? `, ${server.pool.waiting} waiting` : ""})`}
+            tone={server.connections / server.maxConnections > 0.8 ? "danger" : "info"}
+          />
+          <StatTile
+            label="Cache hit ratio"
+            value={server.cacheHit === null ? "—" : `${server.cacheHit}%`}
+            sub="reads served from memory"
+            tone={server.cacheHit === null || server.cacheHit >= 99 ? "ok" : server.cacheHit >= 95 ? "warn" : "danger"}
+          />
+          <StatTile label="Uptime" value={duration(server.uptimeSeconds)} sub={`since the server last started`} />
+        </div>
+        <dl className="grid gap-x-6 gap-y-2 border-t border-line-soft px-4 py-3 text-xs sm:grid-cols-2 lg:grid-cols-4">
+          {(
+            [
+              ["Database", server.name],
+              ["PostgreSQL", server.version],
+              ["Host", `${server.host}${server.port ? `:${server.port}` : ""}`],
+              ["Connected as", server.user],
+              ["Size", bytes(server.sizeBytes)],
+              ["Tables · indexes", `${server.tables} · ${server.indexes} (${server.unusedIndexes} never used)`],
+              ["Transactions", `${n(server.commits)} committed · ${n(server.rollbacks)} rolled back`],
+              ["Deadlocks", n(server.deadlocks)],
+              ["Waiting locks", n(server.waitingLocks)],
+              ["Longest open transaction", server.longestTransactionSeconds ? duration(server.longestTransactionSeconds) : "none"],
+              ["Temp files written", bytes(server.tempBytes)],
+              ["Time zone · encoding", `${server.timezone} · ${server.encoding}`],
+              ["Collation", server.collation],
+              ["Extensions", server.extensions || "none"],
+            ] as const
+          ).map(([k, v]) => (
+            <div key={k} className="min-w-0">
+              <dt className="text-[11px] text-ink-faint">{k}</dt>
+              <dd className="truncate font-medium text-ink" title={v}>
+                {v}
+              </dd>
+            </div>
+          ))}
+        </dl>
+      </Card>
+
+      <Card className="mb-4">
+        <CardHeader
+          title="Diagnostics"
+          description="Ready-made read-only queries against the live database — connections, locks, slow statements, index and table health. Each run is audited."
+        />
+        <Diagnostics options={Object.entries(DIAGNOSTICS).map(([key, d]) => ({ key, label: d.label, hint: d.hint }))} />
+      </Card>
 
       <Card className="mb-4">
         <CardHeader

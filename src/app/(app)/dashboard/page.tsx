@@ -27,6 +27,7 @@ import { DonutChart, StackedBarChart, WaffleChart } from "@/components/charts";
 import { bsMonthRange } from "@/lib/attendance";
 
 import { StaffDashboard } from "./staff-dashboard";
+import { CalendarCard } from "./calendar-card";
 
 export const metadata = { title: "Dashboard" };
 
@@ -323,6 +324,8 @@ export default async function DashboardPage() {
         </Card>
 
         <div className="flex flex-col gap-4">
+          <CalendarCard orgId={orgId} employeeId={viewer.employeeId} />
+
           {/*
             The month, as one shape. A donut earns its place here because the
             statuses genuinely partition the month and the centre can carry the

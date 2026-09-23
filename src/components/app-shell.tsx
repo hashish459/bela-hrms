@@ -3,7 +3,7 @@
 import { useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import { ChevronsLeft, ChevronsRight, LogOut, Menu, X } from "lucide-react";
+import { ChevronsLeft, ChevronsRight, Keyboard, LogOut, Menu, X } from "lucide-react";
 import { authClient } from "@/lib/auth-client";
 import { APP } from "@/lib/branding";
 import { cn } from "@/lib/utils";
@@ -14,6 +14,8 @@ import { ThemeToggle } from "@/components/appearance-controls";
 import { Clock } from "@/components/clock";
 import { RoleSwitcher } from "@/components/role-switcher";
 import { NotificationBell } from "@/components/notification-bell";
+import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
+import { PrintLetterhead } from "@/components/print-letterhead";
 import type { BellSummary } from "@/app/(app)/me/notifications/actions";
 
 const RAIL_KEY = "bela-hrms.nav.railed";
@@ -67,6 +69,13 @@ export function AppShell({
 
   return (
     <div className="flex min-h-screen flex-col">
+      <a
+        href="#main"
+        className="sr-only z-[70] rounded bg-accent px-3 py-2 text-sm font-medium text-on-accent focus:not-sr-only focus:fixed focus:top-2 focus:left-2"
+      >
+        Skip to content
+      </a>
+      <KeyboardShortcuts modules={modules} onToggleSidebar={() => setRailed(!railed)} />
       {/* ------------------------------------------------------------ header */}
       <header className="sticky top-0 z-40 flex h-12 print:hidden shrink-0 items-center gap-2 border-b border-line bg-surface px-3">
         <button
@@ -134,6 +143,18 @@ export function AppShell({
           <RoleSwitcher roles={viewer.switchableRoles} actingAs={viewer.actingAs} />
 
           <NotificationBell initial={notifications} />
+
+          <button
+            type="button"
+            onClick={() => window.dispatchEvent(new KeyboardEvent("keydown", { key: "k", ctrlKey: true }))}
+            className="hidden items-center gap-1.5 rounded border border-line px-2 py-1 text-[11px] text-ink-faint hover:bg-sunk hover:text-ink md:inline-flex"
+            title="Go to any screen (Ctrl K) · all shortcuts (?)"
+            aria-label="Open the command palette"
+            aria-keyshortcuts="Control+K Meta+K"
+          >
+            <Keyboard className="size-3.5" aria-hidden />
+            <span className="font-mono">Ctrl K</span>
+          </button>
 
           <ThemeToggle />
 
@@ -228,8 +249,11 @@ export function AppShell({
 
         {/* ------------------------------------------------------------ main */}
         <div className="flex min-w-0 flex-1 flex-col">
-          <main className="flex-1 px-4 py-5 md:px-6 print:p-0">
-            <Breadcrumb modules={modules} />
+          <main id="main" tabIndex={-1} className="flex-1 px-4 py-5 outline-none md:px-6 print:p-0">
+            <PrintLetterhead modules={modules} viewer={viewer} />
+            <div className="print:hidden">
+              <Breadcrumb modules={modules} />
+            </div>
             {children}
           </main>
 

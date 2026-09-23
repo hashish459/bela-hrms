@@ -179,7 +179,7 @@ export const MODULES: ModuleDefinition[] = [
       ready("attendance.approvals", "Approvals", "/attendance/approvals", "Stamp", "attendance.request.approve", "Requests"),
       ready("attendance.shifts", "Shift Master", "/attendance/shifts", "Timer", "attendance.shift.manage", "Setup"),
       ready("attendance.roster", "Shift Assignment", "/attendance/roster", "CalendarCog", "attendance.roster.manage", "Setup"),
-      planned("attendance.overtime", "Overtime", "/attendance/overtime", "TimerReset", "attendance.request.approve", "Requests",
+      ready("attendance.overtime", "Overtime", "/attendance/overtime", "TimerReset", "attendance.request.create", "Requests",
         "Overtime claims against the OT minutes attendance already computes, with their own approval chain and rate rules."),
       ready("attendance.devices", "Devices", "/attendance/devices", "Fingerprint", "attendance.device.manage", "Setup",
         "Biometric and card readers, who is enrolled on them, and the raw punch log they push."),
@@ -218,6 +218,27 @@ export const MODULES: ModuleDefinition[] = [
         "Paying out unused entitlement at year end, and the payroll line it produces."),
       planned("leave.lapse", "Lapse & Carry Forward", "/leave/lapse", "ArchiveRestore", "leave.balance.manage", "Year end",
         "The year-end job that carries balances forward up to each type's cap and lapses the remainder."),
+    ],
+  },
+
+  // ---------------------------------------------------------------- workbook
+  {
+    id: "workbook",
+    label: "Work-Book",
+    icon: "NotebookPen",
+    order: 35,
+    summary: "The daily work-book: what each employee did today, reviewed and analysed by administrators.",
+    permissions: [
+      { key: "workbook.entry.write", label: "Keep my daily work-book" },
+      { key: "workbook.record.viewAll", label: "Review everybody's work-book records" },
+    ],
+    nav: [
+      mine("workbook.my", "My Work-Book", "/workbook", "NotebookPen", "workbook.entry.write", "Daily",
+        "Record the tasks you worked on each day, the time they took and what came of them, then submit the day."),
+      ready("workbook.records", "Records", "/workbook/records", "BookOpenCheck", "workbook.record.viewAll", "Review",
+        "Every submitted and draft day, filterable by month, department, person and text, exportable to CSV."),
+      ready("workbook.insights", "Insights", "/workbook/insights", "ChartColumn", "workbook.record.viewAll", "Review",
+        "Submission discipline, where the hours went by category, department and project, and who has not written today."),
     ],
   },
 
@@ -627,6 +648,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; permissions: 
     permissions: [
       "docs.read", "admin.settings.appearance",
       "self.desk.view", "self.profile.view", "self.directory.view", "self.notice.read",
+      "workbook.entry.write",
       "hr.employee.view", "hr.employee.create", "hr.employee.update", "hr.employee.separate",
       "hr.employee.viewSalary", "hr.document.manage", "hr.recruitment.manage",
       "attendance.record.viewOwn", "attendance.record.viewAll", "attendance.record.edit",
@@ -644,6 +666,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; permissions: 
     permissions: [
       "docs.read", "admin.settings.appearance",
       "self.desk.view", "self.profile.view", "self.directory.view", "self.notice.read",
+      "workbook.entry.write",
       "hr.employee.view",
       "attendance.record.viewOwn", "attendance.record.viewAll",
       "attendance.request.create", "attendance.request.approve",
@@ -656,6 +679,7 @@ export const SYSTEM_ROLE_TEMPLATES: Record<string, { name: string; permissions: 
     permissions: [
       "docs.read", "admin.settings.appearance",
       "self.desk.view", "self.profile.view", "self.directory.view", "self.notice.read",
+      "workbook.entry.write",
       "attendance.record.viewOwn", "attendance.request.create",
       "leave.request.viewOwn", "leave.request.create",
       "payroll.payslip.viewOwn",
