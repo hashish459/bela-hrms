@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { requirePermission } from "@/lib/session";
 import { cn } from "@/lib/utils";
@@ -30,6 +32,7 @@ export default async function ProfileRequestsPage({ searchParams }: PageProps<"/
   const view = VIEWS.find((v) => v.key === params.view)?.key ?? "pending";
   const rows = await changeQueue(viewer.orgId, view);
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [12, 24, 48] });
   return (
     <>
       <PageHeader
@@ -57,8 +60,9 @@ export default async function ProfileRequestsPage({ searchParams }: PageProps<"/
           <EmptyState title={view === "pending" ? "Nothing waiting" : "Nothing here"} hint={view === "pending" ? "New requests appear here and in your notifications." : undefined} />
         </Card>
       ) : (
+        <>
         <div className="grid gap-3 xl:grid-cols-2">
-          {rows.map(({ r, employeeName, employeeCode, photoFileId, department }) => {
+          {pagedRows.map(({ r, employeeName, employeeCode, photoFileId, department }) => {
             const def = SECTION_BY_KEY.get(r.section as SectionKey);
             const fields = def?.fields ?? [];
             const current = r.current ?? {};
@@ -135,6 +139,8 @@ export default async function ProfileRequestsPage({ searchParams }: PageProps<"/
             );
           })}
         </div>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="requests" sizes={[12, 24, 48]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

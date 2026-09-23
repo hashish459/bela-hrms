@@ -37,16 +37,30 @@ export function OffsetPagination({
   params,
   label = "rows",
   className,
+  param = "page",
+  sizes,
+  sizeParam = "size",
 }: {
   page: OffsetPage;
   /** The current search params, so paging preserves every active filter. */
   params: Record<string, string | string[] | undefined>;
   label?: string;
   className?: string;
+  /** The query parameter this pager owns — distinct per list when a page has several. */
+  param?: string;
+  /** Offer a rows-per-page choice; the first is the default. */
+  sizes?: number[];
+  sizeParam?: string;
 }) {
-  if (page.pageCount <= 1) return null;
+  const canResize = Boolean(sizes?.length) && page.total > (sizes?.[0] ?? Infinity);
+  if (page.pageCount <= 1 && !canResize) return null;
 
-  const href = (n: number) => withParam(params, "page", n === 1 ? null : String(n));
+  const href = (n: number) => withParam(params, param, n === 1 ? null : String(n));
+  // changing the page size starts again from the first page
+  const sizeHref = (n: number) => {
+    const rest = { ...params, [param]: undefined };
+    return withParam(rest, sizeParam, n === sizes?.[0] ? null : String(n));
+  };
 
   return (
     <nav
@@ -56,10 +70,32 @@ export function OffsetPagination({
         className,
       )}
     >
-      <p className="tabular text-[11px] text-ink-faint">
-        {page.from}–{page.to} of {page.total} {label}
-      </p>
+      <div className="flex flex-wrap items-center gap-3">
+        <p className="tabular text-[11px] text-ink-faint">
+          {page.from}–{page.to} of {page.total} {label}
+        </p>
+        {canResize ? (
+          <span className="flex items-center gap-1 text-[11px] text-ink-faint">
+            Show
+            {sizes!.map((n) => (
+              <Link
+                key={n}
+                href={sizeHref(n)}
+                scroll={false}
+                aria-current={n === page.size ? "true" : undefined}
+                className={cn(
+                  "tabular rounded px-1.5 py-0.5 transition-colors",
+                  n === page.size ? "bg-sunk font-semibold text-ink" : "hover:bg-sunk hover:text-ink",
+                )}
+              >
+                {n}
+              </Link>
+            ))}
+          </span>
+        ) : null}
+      </div>
 
+      {page.pageCount > 1 ? (
       <div className="flex items-center gap-1">
         <PageLink
           href={href(page.page - 1)}
@@ -98,6 +134,7 @@ export function OffsetPagination({
           icon={<ChevronRight className="size-3.5" />}
         />
       </div>
+      ) : null}
     </nav>
   );
 }

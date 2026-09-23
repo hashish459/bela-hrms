@@ -5,6 +5,7 @@ import { ArrowRight, CalendarDays, Hourglass, Inbox } from "lucide-react";
 import { StatusBadge } from "@/components/ui";
 import { cn, formatDays } from "@/lib/utils";
 import { WithdrawButton } from "./withdraw-button";
+import { ClientPager, usePager } from "@/components/client-pager";
 
 export type RequestItem = {
   id: string;
@@ -40,6 +41,7 @@ export function RequestList({ items }: { items: RequestItem[] }) {
     return out;
   }, [items]);
   const shown = filter === "all" ? items : items.filter((i) => i.status === filter);
+  const { items: page, pager } = usePager(shown, 8);
 
   return (
     <div>
@@ -73,7 +75,7 @@ export function RequestList({ items }: { items: RequestItem[] }) {
         </div>
       ) : (
         <ol className="divide-y divide-line-soft">
-          {shown.map((r) => (
+          {page.map((r) => (
             <li key={r.id} className="group relative flex gap-3 px-4 py-3.5 transition-colors hover:bg-sunk/50">
               <span className="w-1 shrink-0 rounded-full" style={{ background: r.colour }} aria-hidden />
               <div className="min-w-0 flex-1">
@@ -117,6 +119,7 @@ export function RequestList({ items }: { items: RequestItem[] }) {
           ))}
         </ol>
       )}
+      <ClientPager pager={pager} label="requests" />
     </div>
   );
 }

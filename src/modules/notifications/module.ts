@@ -89,7 +89,14 @@ async function describe(name: string, p: Payload) {
  * is versioned and stable, so a redeploy does not re-deliver completed work.
  */
 for (const entry of CATALOGUE) {
-  if (!entry.source || entry.source === "org.structure.changed" || entry.source.startsWith("people.")) continue;
+  if (
+    !entry.source ||
+    entry.source === "org.structure.changed" ||
+    entry.source.startsWith("people.") ||
+    entry.source.startsWith("attendance.overtime.")
+  ) {
+    continue;
+  }
   subscribe({
     id: `notifications.${entry.key}@1`,
     module: "notifications",
@@ -161,6 +168,57 @@ for (const def of PEOPLE) {
         subjectEmployeeId: subject,
         actorUserId,
         actorLabel: def.key === "people.profile_change_submitted" ? employee : actor,
+        dedupeKey: `${def.key}:${id}`,
+      });
+    },
+  });
+}
+
+/*
+ * Overtime claims. The payload carries the figures already worded for people
+ * ("2h 30m"), so the templates never do arithmetic.
+ */
+const OVERTIME: { key: string; event: DomainEventName }[] = [
+  { key: "attendance.overtime_submitted", event: "attendance.overtime.submitted" },
+  { key: "attendance.overtime_approved", event: "attendance.overtime.approved" },
+  { key: "attendance.overtime_rejected", event: "attendance.overtime.rejected" },
+  { key: "attendance.overtime_withdrawn", event: "attendance.overtime.withdrawn" },
+];
+
+for (const def of OVERTIME) {
+  subscribe({
+    id: `notifications.${def.key}@1`,
+    module: "notifications",
+    event: def.event,
+    async run(payload, orgId) {
+      const id = str(payload.overtimeClaimId);
+      if (!id) return;
+      const subject = str(payload.employeeId);
+      const approver = str(payload.approverEmployeeId);
+      const names = await employeeNames([subject, approver]);
+      const actorUserId = str(payload.decidedByUserId);
+      const actor = await userName(actorUserId);
+      const employee = names.get(subject ?? "") ?? "An employee";
+      const byEmployee = def.key === "attendance.overtime_submitted" || def.key === "attendance.overtime_withdrawn";
+      await notify(orgId, def.key, {
+        context: {
+          employee,
+          approver: names.get(approver ?? "") ?? null,
+          actor,
+          reference: str(payload.reference),
+          date: str(payload.dateBs) ?? str(payload.date),
+          dayKind: str(payload.dayKind),
+          claimed: str(payload.claimed),
+          approved: str(payload.approved),
+          payable: str(payload.payable),
+          rate: str(payload.rate),
+          reason: str(payload.reason),
+          comment: str(payload.comment),
+        },
+        subjectEmployeeId: subject,
+        approverEmployeeId: approver,
+        actorUserId,
+        actorLabel: byEmployee ? employee : actor,
         dedupeKey: `${def.key}:${id}`,
       });
     },

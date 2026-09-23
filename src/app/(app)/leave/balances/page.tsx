@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -20,7 +22,8 @@ import {
 
 export const metadata = { title: "Leave balances" };
 
-export default async function LeaveBalancesPage() {
+export default async function LeaveBalancesPage({ searchParams }: PageProps<"/leave/balances">) {
+  const params = await searchParams;
   const viewer = await requirePermission("leave.balance.manage");
 
   if (!viewer.fiscalYear) {
@@ -116,6 +119,7 @@ export default async function LeaveBalancesPage() {
   const grandUsed = totals.reduce((a, t) => a + t.used, 0);
   const grandPending = totals.reduce((a, t) => a + t.pending, 0);
 
+  const { items: pagedPeople, page: pagedPeoplePage } = pageOf(people, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -175,7 +179,7 @@ export default async function LeaveBalancesPage() {
             </tr>
           </thead>
           <tbody>
-            {people.map(([id, emp]) => (
+            {pagedPeople.map(([id, emp]) => (
               <Tr key={id}>
                 <Td className="sticky left-0 z-10 bg-surface whitespace-nowrap">
                   <Link href={`/hr/employees/${id}`} className="font-medium text-ink hover:text-accent">
@@ -216,6 +220,7 @@ export default async function LeaveBalancesPage() {
             ))}
           </tbody>
         </TableShell>
+      <OffsetPagination page={pagedPeoplePage} params={params} param="page" label="employees" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
       </Card>
     </>
   );

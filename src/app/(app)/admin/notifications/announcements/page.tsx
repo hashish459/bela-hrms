@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { roles } from "@/db/schema/core";
@@ -11,7 +13,8 @@ export const metadata = { title: "Announcements" };
 
 const TONE: Record<string, Tone> = { info: "info", success: "ok", warning: "warn", danger: "danger" };
 
-export default async function AnnouncementsPage() {
+export default async function AnnouncementsPage({ searchParams }: PageProps<"/admin/notifications/announcements">) {
+  const params = await searchParams;
   const viewer = await requirePermission("admin.notifications.manage");
   const [deptRows, branchRows, roleRows, everyone, recent] = await Promise.all([
     db
@@ -32,6 +35,7 @@ export default async function AnnouncementsPage() {
   const audienceText = (a: { kind: string; label?: string }) =>
     a.kind === "everyone" ? "Everyone" : `${a.kind[0].toUpperCase()}${a.kind.slice(1)}: ${a.label ?? "—"}`;
 
+  const { items: pagedRecent, page: pagedRecentPage } = pageOf(recent, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <div className="flex flex-col gap-4">
       <AnnouncementComposer departments={deptRows} branches={branchRows} roles={roleRows} everyone={everyone.length} />
@@ -41,6 +45,7 @@ export default async function AnnouncementsPage() {
         {recent.length === 0 ? (
           <EmptyState title="No announcements sent yet" />
         ) : (
+        <>
           <TableShell className="rounded-none border-0">
             <thead>
               <tr>
@@ -52,7 +57,7 @@ export default async function AnnouncementsPage() {
               </tr>
             </thead>
             <tbody>
-              {recent.map((a) => (
+              {pagedRecent.map((a) => (
                 <Tr key={a.id}>
                   <Td className="max-w-md">
                     <p className="flex items-center gap-2 font-medium text-ink">
@@ -72,6 +77,8 @@ export default async function AnnouncementsPage() {
               ))}
             </tbody>
           </TableShell>
+      <OffsetPagination page={pagedRecentPage} params={params} param="page" label="announcements" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
         )}
       </Card>
     </div>

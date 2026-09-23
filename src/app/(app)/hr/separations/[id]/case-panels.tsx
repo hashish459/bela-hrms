@@ -13,6 +13,7 @@ import {
   updateSeparationAction,
   type SeparationState,
 } from "../actions";
+import { useConfirmSubmit } from "@/components/feedback";
 
 const initial: SeparationState = {};
 
@@ -197,6 +198,13 @@ export function CaseForm({
 export function CloseCase({ id, pendingLines, servingNotice }: { id: string; pendingLines: number; servingNotice: boolean }) {
   const [state, action, pending] = useActionState(completeSeparationAction, initial);
   const [cState, cancel, cancelling] = useActionState(cancelSeparationAction, initial);
+  const askComplete = useConfirmSubmit({
+    title: "Complete this separation?",
+    body: "The employee record is closed, they come off strength, stop being anybody's supervisor and their login is switched off.",
+    confirmLabel: "Complete separation",
+    tone: "danger",
+  });
+  const askCancel = useConfirmSubmit({ title: "Cancel this separation case?", body: "The employee stays on strength as if it had not been started.", confirmLabel: "Cancel case", cancelLabel: "Keep case", tone: "warning" });
   return (
     <div className="flex flex-col gap-3 p-4">
       <p className="text-sm text-ink-soft">
@@ -216,9 +224,7 @@ export function CloseCase({ id, pendingLines, servingNotice }: { id: string; pen
       <div className="flex flex-wrap gap-2">
         <form
           action={action}
-          onSubmit={(e) => {
-            if (!confirm("Complete this separation? The employee record will be closed.")) e.preventDefault();
-          }}
+          onSubmit={askComplete}
         >
           <input type="hidden" name="id" value={id} />
           <Button type="submit" disabled={pending || pendingLines > 0 || servingNotice}>
@@ -228,9 +234,7 @@ export function CloseCase({ id, pendingLines, servingNotice }: { id: string; pen
         </form>
         <form
           action={cancel}
-          onSubmit={(e) => {
-            if (!confirm("Cancel this case? The employee stays on strength.")) e.preventDefault();
-          }}
+          onSubmit={askCancel}
         >
           <input type="hidden" name="id" value={id} />
           <Button type="submit" variant="ghost" disabled={cancelling}>

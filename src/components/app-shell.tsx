@@ -16,6 +16,7 @@ import { RoleSwitcher } from "@/components/role-switcher";
 import { NotificationBell } from "@/components/notification-bell";
 import { KeyboardShortcuts } from "@/components/keyboard-shortcuts";
 import { PrintLetterhead } from "@/components/print-letterhead";
+import { FeedbackProvider } from "@/components/feedback";
 import type { BellSummary } from "@/app/(app)/me/notifications/actions";
 
 const RAIL_KEY = "bela-hrms.nav.railed";
@@ -68,6 +69,7 @@ export function AppShell({
     .toUpperCase();
 
   return (
+    <FeedbackProvider>
     <div className="flex min-h-screen flex-col">
       <a
         href="#main"
@@ -283,5 +285,6 @@ export function AppShell({
         </div>
       </div>
     </div>
+    </FeedbackProvider>
   );
 }

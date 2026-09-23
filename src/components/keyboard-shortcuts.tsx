@@ -100,7 +100,7 @@ export function KeyboardShortcuts({ modules, onToggleSidebar }: { modules: NavMo
         return;
       }
       if (e.metaKey || e.ctrlKey || e.altKey || isTyping(e.target)) return;
-      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcuts])')) return;
+      if (document.querySelector('[role="dialog"][aria-modal="true"]:not([data-shortcuts]), [role="alertdialog"]')) return;
 
       if (pending) {
         const c = chords.find((x) => x.key === e.key.toLowerCase());

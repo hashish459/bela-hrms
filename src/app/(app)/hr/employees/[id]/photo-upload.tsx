@@ -3,6 +3,7 @@
 import { useRef, useState, useTransition } from "react";
 import { Camera, Loader2, Trash2 } from "lucide-react";
 import { Avatar } from "@/components/avatar";
+import { ZoomablePhoto } from "@/components/photo-viewer";
 import { removeEmployeePhoto, uploadEmployeePhoto } from "../actions";
 
 /**
@@ -126,23 +127,28 @@ export function PhotoUpload({
   return (
     <div className="flex flex-col items-center gap-1.5">
       <div className="relative">
-        {preview ? (
-          // eslint-disable-next-line @next/next/no-img-element
-          <img
-            src={preview}
-            alt=""
-            className="size-24 shrink-0 rounded-full object-cover ring-1 ring-line-soft"
-          />
-        ) : (
-          <Avatar
-            photoId={photoId}
-            photoUrl={photoUrl}
-            firstName={firstName}
-            lastName={lastName}
-            seed={employeeId}
-            size="xl"
-          />
-        )}
+        <ZoomablePhoto
+          src={preview ?? (photoId ? `/api/files/${photoId}` : photoUrl)}
+          name={`${firstName} ${lastName}`.trim() || "Employee"}
+        >
+          {preview ? (
+            // eslint-disable-next-line @next/next/no-img-element
+            <img
+              src={preview}
+              alt=""
+              className="size-24 shrink-0 rounded-full object-cover ring-1 ring-line-soft"
+            />
+          ) : (
+            <Avatar
+              photoId={photoId}
+              photoUrl={photoUrl}
+              firstName={firstName}
+              lastName={lastName}
+              seed={employeeId}
+              size="xl"
+            />
+          )}
+        </ZoomablePhoto>
 
         {pending ? (
           <span className="absolute inset-0 grid place-items-center rounded-full bg-ink/40">

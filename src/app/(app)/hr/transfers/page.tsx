@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -72,6 +74,7 @@ export default async function TransfersPage({ searchParams }: PageProps<"/hr/tra
 
   const bs = (d: string) => formatBs(adToBs(d));
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -122,6 +125,7 @@ export default async function TransfersPage({ searchParams }: PageProps<"/hr/tra
           />
         </Card>
       ) : (
+        <>
         <TableShell>
           <thead>
             <tr>
@@ -135,7 +139,7 @@ export default async function TransfersPage({ searchParams }: PageProps<"/hr/tra
             </tr>
           </thead>
           <tbody>
-            {rows.map((m) => {
+            {pagedRows.map((m) => {
               const changes = [
                 m.toBranch ? ["Branch", m.fromBranch, m.toBranch] : null,
                 m.toDepartment ? ["Department", m.fromDepartment, m.toDepartment] : null,
@@ -194,6 +198,8 @@ export default async function TransfersPage({ searchParams }: PageProps<"/hr/tra
             })}
           </tbody>
         </TableShell>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="movements" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

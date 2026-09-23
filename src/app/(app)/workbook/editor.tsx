@@ -32,6 +32,7 @@ import {
 } from "@/modules/workbook/catalogue";
 import { saveWorkBookAction, type WorkBookState } from "./actions";
 import { CategoryBar } from "./entry-view";
+import { useConfirmSubmit, useToastedAction } from "@/components/feedback";
 
 type Row = {
   key: string;
@@ -162,7 +163,7 @@ export function WorkBookEditor({
   yesterdayPlan: string | null;
   reopenedBy: string | null;
 }) {
-  const [state, action, pending] = useActionState(saveWorkBookAction, initialState);
+  const [state, action, pending] = useActionState(useToastedAction(saveWorkBookAction), initialState);
   const [rows, setRows] = useState<Row[]>(() =>
     initial.tasks.length ? initial.tasks.map((t) => ({ ...t, key: newKey(), open: Boolean(t.details || t.outcome) })) : [blank()],
   );
@@ -179,6 +180,30 @@ export function WorkBookEditor({
   const dirty = normalised(payload) !== baseline;
   const errors = state.fieldErrors ?? {};
 
+  const blocked = used.filter((r) => r.status === "blocked").length;
+  const askSubmit = useConfirmSubmit((submitter) =>
+    submitter?.value === "submit"
+      ? {
+          title: "Submit this day?",
+          body: (
+            <div className="flex flex-col gap-2">
+              <p>
+                <span className="font-medium text-ink">{hours(total)}</span> across{" "}
+                <span className="font-medium text-ink">
+                  {used.length} {used.length === 1 ? "task" : "tasks"}
+                </span>
+                {blocked ? <span className="text-danger"> · {blocked} blocked</span> : null}
+                {rating ? <span> · rated {rating}/5</span> : null}
+              </p>
+              <p>Submitting locks the day. Only an administrator can reopen it for changes.</p>
+            </div>
+          ),
+          confirmLabel: "Submit day",
+          cancelLabel: "Keep editing",
+        }
+      : null,
+  );
+
   const update = (key: string, patch: Partial<Row>) => setRows((rs) => rs.map((r) => (r.key === key ? { ...r, ...patch } : r)));
   const move = (i: number, d: -1 | 1) =>
     setRows((rs) => {
@@ -194,10 +219,7 @@ export function WorkBookEditor({
   return (
     <form
       action={action}
-      onSubmit={(e) => {
-        const submitter = (e.nativeEvent as SubmitEvent).submitter as HTMLButtonElement | null;
-        if (submitter?.value === "submit" && !confirm("Submit this day? It locks, and only an administrator can reopen it.")) e.preventDefault();
-      }}
+      onSubmit={askSubmit}
       className="flex flex-col gap-4"
     >
       <input type="hidden" name="date" value={date} />

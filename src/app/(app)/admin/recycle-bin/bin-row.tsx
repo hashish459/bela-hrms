@@ -3,14 +3,20 @@
 import { useActionState } from "react";
 import { Loader2, RotateCcw, Trash2 } from "lucide-react";
 import { binAction, type BinState } from "./actions";
+import { useConfirmSubmit } from "@/components/feedback";
 
 const initial: BinState = {};
 
 export function BinRowActions({ type, id, label }: { type: string; id: string; label: string }) {
   const [state, action, pending] = useActionState(binAction, initial);
+  const ask = useConfirmSubmit((submitter) =>
+    submitter?.value === "purge"
+      ? { title: `Permanently delete “${label}”?`, body: "It is removed for good, with everything that belongs to it. This cannot be undone.", confirmLabel: "Delete permanently", tone: "danger" }
+      : null,
+  );
   if (state.ok) return <span className="text-[11px] text-ok">{state.ok}</span>;
   return (
-    <form action={action} className="flex flex-col items-end gap-1">
+    <form action={action} onSubmit={ask} className="flex flex-col items-end gap-1">
       <input type="hidden" name="type" value={type} />
       <input type="hidden" name="id" value={id} />
       <input type="hidden" name="label" value={label} />
@@ -30,9 +36,6 @@ export function BinRowActions({ type, id, label }: { type: string; id: string; l
           name="op"
           value="purge"
           disabled={pending}
-          onClick={(e) => {
-            if (!confirm(`Permanently delete “${label}”? This cannot be undone.`)) e.preventDefault();
-          }}
           className="inline-flex items-center gap-1 rounded border border-line px-2 py-1 text-xs text-ink-soft hover:border-danger/40 hover:bg-danger-soft hover:text-danger disabled:opacity-50"
         >
           <Trash2 className="size-3" />

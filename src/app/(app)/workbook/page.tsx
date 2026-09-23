@@ -1,14 +1,15 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { CalendarDays, ChevronLeft, ChevronRight, Flame, Lock } from "lucide-react";
+import { CalendarDays, ChevronLeft, ChevronRight, Lock } from "lucide-react";
 import { requirePermission } from "@/lib/session";
-import { addDays, adToBs, BS_MONTHS, todayInNepal, weekdayOf } from "@/lib/bs";
+import { addDays, adToBs, BS_MONTHS, todayInNepal } from "@/lib/bs";
 import { cn } from "@/lib/utils";
 import { Badge, Card, CardHeader, PageHeader } from "@/components/ui";
 import { hours } from "@/modules/workbook/catalogue";
 import { earliestWritable, entryFor, recentDays } from "@/modules/workbook/service";
-import { adLabel, dayTitle, stamp, WEEKDAYS } from "./format";
+import { adLabel, dayTitle, stamp } from "./format";
 import { EntryView, Rating } from "./entry-view";
+import { WorkBookGlance } from "./glance";
 import { WorkBookEditor, type EditorInitial } from "./editor";
 
 export const metadata = { title: "My Work-Book" };
@@ -30,17 +31,10 @@ export default async function WorkBookPage({ searchParams }: PageProps<"/workboo
   const requested = typeof params.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(params.date) ? params.date : today;
   const date = requested > today || requested < addDays(today, -HISTORY_DAYS) ? today : requested;
 
-  const [entry, previous, strip] = await Promise.all([entryFor(author, date), entryFor(author, addDays(date, -1)), recentDays(author, 14)]);
+  const [entry, previous, strip] = await Promise.all([entryFor(author, date), entryFor(author, addDays(date, -1)), recentDays(author, 30)]);
 
   const submitted = entry?.status === "submitted";
   const writable = !submitted && (date >= earliestWritable(today) || Boolean(entry?.reopenedAt));
-  const done = strip.filter((d) => d.status === "submitted").length;
-  let streak = 0;
-  for (const d of strip) {
-    if (d.status === "submitted") streak++;
-    else if (d.weeklyOff || (d.date === today && !d.status)) continue;
-    else break;
-  }
 
   const initial: EditorInitial = {
     summary: entry?.summary ?? "",
@@ -158,54 +152,9 @@ export default async function WorkBookPage({ searchParams }: PageProps<"/workboo
           )}
         </div>
 
-        {/* the last fortnight */}
+        {/* the last month at a glance */}
         <aside className="flex flex-col gap-4">
-          <Card>
-            <CardHeader title="Last 14 days" description={`${done} submitted`} />
-            <div className="p-4">
-              <div className="mb-4 flex items-center gap-3 rounded-md bg-sunk p-3">
-                <Flame className={cn("size-6", streak ? "text-warn" : "text-ink-faint")} aria-hidden />
-                <div>
-                  <p className="tabular text-lg leading-none font-semibold text-ink">
-                    {streak} {streak === 1 ? "day" : "days"}
-                  </p>
-                  <p className="mt-0.5 text-[11px] text-ink-faint">submitted in a row</p>
-                </div>
-              </div>
-              <ol className="grid grid-cols-7 gap-1.5">
-                {[...strip].reverse().map((d) => {
-                  const bs = adToBs(d.date);
-                  return (
-                    <li key={d.date}>
-                      <Link
-                        href={d.date === today ? "/workbook" : `/workbook?date=${d.date}`}
-                        title={`${dayTitle(d.date)} — ${d.status === "submitted" ? `submitted, ${hours(d.totalMinutes)}` : d.status === "draft" ? "draft" : d.weeklyOff ? "weekly off" : "not written"}`}
-                        className={cn(
-                          "flex aspect-square flex-col items-center justify-center rounded-md border text-[11px] transition-colors",
-                          d.status === "submitted"
-                            ? "border-ok/30 bg-ok-soft text-ok"
-                            : d.status === "draft"
-                              ? "border-warn/30 bg-warn-soft text-warn"
-                              : d.weeklyOff
-                                ? "border-dashed border-line text-ink-faint/60"
-                                : "border-line text-ink-faint hover:bg-sunk",
-                          d.date === date && "ring-2 ring-accent ring-offset-1 ring-offset-surface",
-                        )}
-                      >
-                        <span className="text-[8px] uppercase opacity-70">{WEEKDAYS[weekdayOf(d.date)].slice(0, 2)}</span>
-                        <span className="tabular font-semibold">{bs.day}</span>
-                      </Link>
-                    </li>
-                  );
-                })}
-              </ol>
-              <ul className="mt-3 flex flex-wrap gap-x-3 gap-y-1 text-[10px] text-ink-faint">
-                <li className="flex items-center gap-1"><span className="size-2 rounded-sm bg-ok" />Submitted</li>
-                <li className="flex items-center gap-1"><span className="size-2 rounded-sm bg-warn" />Draft</li>
-                <li className="flex items-center gap-1"><span className="size-2 rounded-sm border border-dashed border-line" />Saturday</li>
-              </ul>
-            </div>
-          </Card>
+          <WorkBookGlance days={strip} today={today} selected={date} />
 
           <Card>
             <CardHeader title="Good entries" />

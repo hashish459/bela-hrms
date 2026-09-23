@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
@@ -11,7 +13,8 @@ import { AttendanceDecisionCard } from "./decision-card";
 
 export const metadata = { title: "Attendance approvals" };
 
-export default async function AttendanceApprovalsPage() {
+export default async function AttendanceApprovalsPage({ searchParams }: PageProps<"/attendance/approvals">) {
+  const params = await searchParams;
   const viewer = await requirePermission("attendance.request.approve");
   const seesEverything = can(viewer, "attendance.record.viewAll");
 
@@ -65,6 +68,7 @@ export default async function AttendanceApprovalsPage() {
     )
     .orderBy(asc(attendanceRequests.date));
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [12, 24, 48] });
   return (
     <>
       <PageHeader
@@ -84,8 +88,9 @@ export default async function AttendanceApprovalsPage() {
           />
         </Card>
       ) : (
+        <>
         <div className="grid gap-3 xl:grid-cols-2">
-          {rows.map((r) => (
+          {pagedRows.map((r) => (
             <AttendanceDecisionCard
               key={r.requestId}
               request={{
@@ -95,6 +100,8 @@ export default async function AttendanceApprovalsPage() {
             />
           ))}
         </div>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="requests" sizes={[12, 24, 48]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

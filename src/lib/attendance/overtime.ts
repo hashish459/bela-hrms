@@ -6,6 +6,7 @@ import { attendanceDays, overtimeClaims, overtimeRules } from "@/db/schema/atten
 import { employees } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { addDays, adToBs, formatBsKey, todayInNepal } from "@/lib/bs";
+import { publish } from "@/kernel/events";
 
 /**
  * Overtime claims.
@@ -153,6 +154,13 @@ export async function eligibleDays(orgId: string, employeeId: string, today = to
   return out;
 }
 
+/** "2h 30m" — the payloads carry figures already worded for the notification. */
+function dur(minutes: number | null | undefined) {
+  const m = Math.max(0, Math.round(minutes ?? 0));
+  const h = Math.floor(m / 60);
+  return h && m % 60 ? `${h}h ${m % 60}m` : h ? `${h}h` : `${m % 60}m`;
+}
+
 async function nextReference(tx: Parameters<Parameters<typeof db.transaction>[0]>[0], orgId: string, year: number) {
   const series = `${orgId}:OT-${year}`;
   await tx.execute(sql`select pg_advisory_xact_lock(hashtext(${series}))`);
@@ -218,6 +226,26 @@ export async function submitClaim(input: {
           approverEmployeeId: emp?.supervisorId ?? null,
         })
         .returning({ id: overtimeClaims.id });
+
+      // in the same transaction: the claim and its "please approve" commit together
+      await publish(tx, {
+        orgId: input.orgId,
+        module: "attendance",
+        name: "attendance.overtime.submitted",
+        payload: {
+          overtimeClaimId: row.id,
+          reference,
+          employeeId: input.employeeId,
+          approverEmployeeId: emp?.supervisorId ?? null,
+          date: input.date,
+          dateBs: day.dateBs ?? formatBsKey(adToBs(input.date)),
+          dayKind: DAY_KIND_LABEL[kind],
+          claimed: dur(input.minutes),
+          rate: String(rule.multiplier),
+          reason: input.reason,
+        },
+        dedupeKey: `attendance.overtime.submitted:${row.id}`,
+      });
       return { id: row.id, reference };
     });
   } catch (error) {
@@ -228,20 +256,38 @@ export async function submitClaim(input: {
 }
 
 export async function withdrawClaim(orgId: string, employeeId: string, id: string) {
-  const rows = await db
-    .update(overtimeClaims)
-    .set({ status: "withdrawn", updatedAt: new Date() })
-    .where(
-      and(
-        eq(overtimeClaims.id, id),
-        eq(overtimeClaims.orgId, orgId),
-        eq(overtimeClaims.employeeId, employeeId),
-        eq(overtimeClaims.status, "pending"),
-      ),
-    )
-    .returning({ reference: overtimeClaims.reference });
-  if (!rows.length) throw new OvertimeError("Only a pending claim can be withdrawn.");
-  return rows[0].reference;
+  return db.transaction(async (tx) => {
+    const rows = await tx
+      .update(overtimeClaims)
+      .set({ status: "withdrawn", updatedAt: new Date() })
+      .where(
+        and(
+          eq(overtimeClaims.id, id),
+          eq(overtimeClaims.orgId, orgId),
+          eq(overtimeClaims.employeeId, employeeId),
+          eq(overtimeClaims.status, "pending"),
+        ),
+      )
+      .returning();
+    if (!rows.length) throw new OvertimeError("Only a pending claim can be withdrawn.");
+    const c = rows[0];
+    await publish(tx, {
+      orgId,
+      module: "attendance",
+      name: "attendance.overtime.withdrawn",
+      payload: {
+        overtimeClaimId: c.id,
+        reference: c.reference,
+        employeeId: c.employeeId,
+        approverEmployeeId: c.approverEmployeeId,
+        date: c.date,
+        dateBs: c.dateBs,
+        claimed: dur(c.claimedMinutes),
+      },
+      dedupeKey: `attendance.overtime.withdrawn:${c.id}`,
+    });
+    return c.reference;
+  });
 }
 
 export type Decider = {
@@ -297,6 +343,28 @@ export async function decideClaim(
         updatedAt: new Date(),
       })
       .where(eq(overtimeClaims.id, id));
+
+    await publish(tx, {
+      orgId,
+      module: "attendance",
+      name: decision === "approved" ? "attendance.overtime.approved" : "attendance.overtime.rejected",
+      payload: {
+        overtimeClaimId: c.id,
+        reference: c.reference,
+        employeeId: c.employeeId,
+        approverEmployeeId: c.approverEmployeeId,
+        date: c.date,
+        dateBs: c.dateBs,
+        dayKind: DAY_KIND_LABEL[c.dayKind],
+        claimed: dur(c.claimedMinutes),
+        approved: approved === null ? null : dur(approved),
+        payable: payable === null ? null : dur(payable),
+        rate: String(Number(c.multiplier)),
+        comment: input.note,
+        decidedByUserId: by.userId,
+      },
+      dedupeKey: `attendance.overtime.${decision}:${c.id}`,
+    });
     return { reference: c.reference, employeeId: c.employeeId };
   });
 }

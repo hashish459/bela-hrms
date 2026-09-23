@@ -15,6 +15,7 @@ import { requireSelf } from "@/modules/selfservice/guard";
 import { adToBs, formatBs, todayInNepal } from "@/lib/bs";
 import { Badge, Card, PageHeader, TableShell, Td, Th, Tr } from "@/components/ui";
 import { Avatar, DeskTabs, Facts, Muted, Panel, PanelEmpty } from "../parts";
+import { ZoomablePhoto } from "@/components/photo-viewer";
 
 export const metadata = { title: "My profile" };
 
@@ -79,11 +80,13 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
 
       {/* ------------------------------------------------------------ identity */}
       <Card className="mb-4 flex flex-wrap items-center gap-4 p-4">
-        <Avatar
-          name={fullName}
-          photoUrl={e.photoFileId ? `/api/files/${e.photoFileId}` : e.photoUrl}
-          size={56}
-        />
+        <ZoomablePhoto src={e.photoFileId ? `/api/files/${e.photoFileId}` : e.photoUrl} name={fullName}>
+          <Avatar
+            name={fullName}
+            photoUrl={e.photoFileId ? `/api/files/${e.photoFileId}` : e.photoUrl}
+            size={56}
+          />
+        </ZoomablePhoto>
         <div className="min-w-0 flex-1">
           <p className="text-base font-semibold text-ink">{fullName}</p>
           {e.fullNameNepali ? (

@@ -204,3 +204,21 @@ export function withParam(
   const query = next.toString();
   return query ? `?${query}` : "?";
 }
+
+/**
+ * One call for a server page that pages an already-loaded list: reads the
+ * page (and optional size) from the query string under its own parameter
+ * names, and returns the slice with the page it describes.
+ */
+export function pageOf<T>(
+  rows: readonly T[],
+  params: Record<string, string | string[] | undefined>,
+  opts: { param?: string; sizeParam?: string; size?: number; sizes?: number[] } = {},
+): { items: T[]; page: OffsetPage } {
+  const one = (v: string | string[] | undefined) => (Array.isArray(v) ? v[0] : v);
+  const sizes = opts.sizes;
+  const requested = Number(one(params[opts.sizeParam ?? "size"]));
+  const size = sizes?.includes(requested) ? requested : (opts.size ?? sizes?.[0] ?? PAGE_SIZE.compact);
+  const page = offsetPage({ page: one(params[opts.param ?? "page"]), size, total: rows.length, defaultSize: size });
+  return { items: sliceOffsetPage(rows, page), page };
+}

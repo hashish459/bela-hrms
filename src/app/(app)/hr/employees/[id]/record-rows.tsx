@@ -7,6 +7,7 @@ import { SideDrawer } from "@/components/side-drawer";
 import { SectionFields } from "@/components/section-fields";
 import { SECTION_BY_KEY, displayValue, type SectionKey } from "@/modules/people/profile-fields";
 import { removeRowAction, saveRowAction, type RowState } from "../record-actions";
+import { useConfirmSubmit } from "@/components/feedback";
 
 type Value = string | number | boolean | null;
 export type RecordRow = { id: string; values: Record<string, Value> };
@@ -41,6 +42,7 @@ export function RecordRows({
   const [editing, setEditing] = useState<RecordRow | "new" | null>(null);
   const [flash, setFlash] = useState<string | null>(null);
   const [removeState, removeAction, removing] = useActionState(removeRowAction, initial);
+  const askRemove = useConfirmSubmit({ title: "Remove this entry?", body: "It goes to the recycle bin, where an administrator can restore it.", confirmLabel: "Remove", tone: "danger" });
 
   useEffect(() => {
     if (!flash) return;
@@ -114,9 +116,7 @@ export function RecordRows({
                         </button>
                         <form
                           action={removeAction}
-                          onSubmit={(e) => {
-                            if (!confirm("Remove this entry? It goes to the recycle bin.")) e.preventDefault();
-                          }}
+                          onSubmit={askRemove}
                         >
                           <input type="hidden" name="section" value={section} />
                           <input type="hidden" name="rowId" value={r.id} />
