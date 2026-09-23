@@ -141,9 +141,27 @@ export function parseBsKey(value: string): BsDate | null {
   return bs;
 }
 
-/** Inclusive day count between two ISO dates. */
+/**
+ * Inclusive day count between two ISO dates: the same day is **1**, not 0.
+ *
+ * That is the leave convention and it is deliberate — a one-day leave from
+ * Sunday to Sunday is one day, not zero — but it is the wrong primitive for a
+ * countdown. Use `daysUntil` for "how many days until this expires".
+ */
 export function daysBetween(fromIso: string, toIso: string): number {
   return toEpochDay(toIso) - toEpochDay(fromIso) + 1;
+}
+
+/**
+ * Exclusive day difference: today to today is **0**, yesterday is **-1**.
+ *
+ * The counterpart to `daysBetween`, and separate from it because the two answer
+ * genuinely different questions. Expiry and probation countdowns need this one:
+ * with the inclusive count, a document that expired yesterday reads as zero
+ * days remaining rather than one day overdue, and the reminder never fires.
+ */
+export function daysUntil(fromIso: string, toIso: string): number {
+  return toEpochDay(toIso) - toEpochDay(fromIso);
 }
 
 /** Adds days to an ISO date. */

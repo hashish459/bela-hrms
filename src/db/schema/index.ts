@@ -1,5 +1,6 @@
 export * from "./auth";
 export * from "./core";
+export * from "./files";
 export * from "./org";
 export * from "./org-structure";
 export * from "./hr";
@@ -8,5 +9,6 @@ export * from "./calendar";
 export * from "./leave";
 export * from "./leave-policy";
 export * from "./attendance";
+export * from "./devices";
 export * from "./selfservice";
 export * from "./kernel";

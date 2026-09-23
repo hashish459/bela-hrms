@@ -34,6 +34,10 @@ ${BOLD}Bela-HRMS${RESET}
       full    …and a complete closed previous fiscal year
       empty   …schema only
 
+  ${CYAN}./bela bench${RESET} [--build] [--explain]
+      Measure the hot pages against a production-shaped dataset
+      (459 employees, 335K attendance rows) in a scratch database.
+
   ${CYAN}./bela check${RESET}
       typecheck, lint, and every verification suite against the real database.
 
@@ -53,6 +57,7 @@ case "$cmd" in
   up)      exec node scripts/dev/up.mjs "$@" ;;
   doctor)  exec node scripts/dev/doctor.mjs "$@" ;;
   db)      exec node scripts/dev/db.mjs "$@" ;;
+  bench)   exec node scripts/dev/bench.mjs "$@" ;;
   build)   exec pnpm build ;;
 
   check)

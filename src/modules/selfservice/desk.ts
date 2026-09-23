@@ -310,7 +310,11 @@ export async function deskSummary(ctx: SelfContext) {
         name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
         dateOfBirth: employees.dateOfBirth,
         department: departments.name,
-        photoUrl: employees.photoUrl,
+        // Prefer a photograph uploaded through the product over a legacy
+        // hosted URL, resolved here so every desk screen gets one field and
+        // none of them has to know the file route exists. In Postgres
+        // `'x' || NULL` is NULL, so the coalesce falls through cleanly.
+        photoUrl: sql<string | null>`coalesce('/api/files/' || ${employees.photoFileId}, ${employees.photoUrl})`,
       })
       .from(employees)
       .leftJoin(departments, eq(departments.id, employees.departmentId))
@@ -387,7 +391,7 @@ export async function directory(
       nameNepali: employees.fullNameNepali,
       workEmail: employees.workEmail,
       mobile: employees.mobile,
-      photoUrl: employees.photoUrl,
+      photoUrl: sql<string | null>`coalesce('/api/files/' || ${employees.photoFileId}, ${employees.photoUrl})`,
       designation: designations.name,
       department: departments.name,
       branch: branches.name,

@@ -116,9 +116,12 @@ export const MODULES: ModuleDefinition[] = [
     nav: [
       ready("hr.employees", "Employees", "/hr/employees", "Users", "hr.employee.view"),
       ready("hr.reporting-lines", "Reporting Lines", "/hr/reporting-lines", "Network", "hr.employee.view"),
-      planned("hr.documents", "Documents", "/hr/documents", "FileText", "hr.document.manage", "Records",
+      ready("hr.documents", "Documents", "/hr/documents", "FileText", "hr.document.manage", "Records",
         "Contracts, certificates and identity documents against each employee, with expiry reminders."),
-      planned("hr.confirmation", "Confirmations", "/hr/confirmations", "BadgeCheck", "hr.employee.update", "Lifecycle",
+      // Read-only for anyone who can see employees; recording a decision needs
+      // hr.employee.update, which the page checks for itself. Gating the menu on
+      // update would hide the queue from the people who chase it.
+      ready("hr.confirmation", "Confirmations", "/hr/confirmations", "BadgeCheck", "hr.employee.view", "Lifecycle",
         "Probation reviews falling due, and the confirmation decision that moves someone to permanent."),
       planned("hr.transfers", "Transfers & Promotions", "/hr/transfers", "ArrowRightLeft", "hr.employee.update", "Lifecycle",
         "Dated placement changes written to employee_assignments, so payroll can answer what was true on a date."),
@@ -156,8 +159,8 @@ export const MODULES: ModuleDefinition[] = [
       ready("attendance.roster", "Shift Assignment", "/attendance/roster", "CalendarCog", "attendance.roster.manage", "Setup"),
       planned("attendance.overtime", "Overtime", "/attendance/overtime", "TimerReset", "attendance.request.approve", "Requests",
         "Overtime claims against the OT minutes attendance already computes, with their own approval chain and rate rules."),
-      planned("attendance.devices", "Devices", "/attendance/devices", "Fingerprint", "attendance.device.manage", "Setup",
-        "Biometric and card readers, their sync schedule, and the raw punch log they push."),
+      ready("attendance.devices", "Devices", "/attendance/devices", "Fingerprint", "attendance.device.manage", "Setup",
+        "Biometric and card readers, who is enrolled on them, and the raw punch log they push."),
       planned("attendance.reports", "Reports", "/attendance/reports", "BarChart3", "attendance.record.viewAll", "Reports",
         "Late arrival, absenteeism, overtime and muster-roll reports, exportable for payroll."),
     ],

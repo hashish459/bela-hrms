@@ -390,6 +390,7 @@ public/brand/bela-logo.png   company logo (also src/app/icon.png, the favicon)
 | `./bela doctor` | diagnose the environment; every failure names its fix |
 | `./bela db fresh --full` | drop, create with UTF-8, migrate, seed both years |
 | `./bela db status` | what is in the database right now |
+| `./bela bench --build` | measure the hot pages at 459 employees / 335 K rows |
 | `./bela check` | typecheck, lint, and every verification suite |
 | `./bela stop` · `./bela reset` | stop a stray dev server · reinstall from scratch |
 | `pnpm dev` · `pnpm build` | run · production build |
@@ -402,7 +403,106 @@ public/brand/bela-logo.png   company logo (also src/app/icon.png, the favicon)
 | `pnpm check:isolation` | proves a failing module cannot take another down |
 | `pnpm check:org` | proves the structure hierarchy rules |
 | `pnpm check:leave` | proves leave policy reaches attendance and payroll |
+| `pnpm check:people` | proves expiry, probation, upload and reporting-loop rules |
 | `pnpm typecheck` · `pnpm lint` | |
+
+## Personnel records
+
+Four things the recovered database captured and never acted on.
+
+**The record itself.** `EmployeeInfo` had **263 columns over 459 people**, and the screen
+over it was a form with every one of them — a data-entry surface, not a record anybody
+reads. The profile here is organised around the questions somebody opens it to answer,
+with anything carrying a deadline surfaced at the top. A photograph is resized in the
+browser before upload: a 1.04 MB test image arrived as **6.7 KB**, measured, which is why
+there is no native image library on the server.
+
+**Documents.** `EmpDocumentInfo` held a thousand rows with issue and expiry dates on them,
+and its view joined an `ApprovalStatus` to the same action table the leave workflow used —
+so a personnel document was already meant to be a *governed* record rather than a file in a
+folder. What was missing was any screen that asked "what expires next month". That question
+is now the register, with a status of pending / verified / rejected behind it. Editing a
+verified document resets it to pending, because a tick that says "somebody checked this
+scan" stops meaning anything the moment the scan changes.
+
+**Reporting lines,** editable in place. The chain routes leave approvals, so a loop in it is
+an approval that can never be routed. The old tree screen dropped looped people silently —
+neither was a root, and their parent was unreachable — so nobody could find where they had
+gone. Here the supervisor list excludes anyone already below you, the server re-checks the
+whole chain before writing, and any loop already in the data is listed rather than hidden.
+
+**Confirmations.** Probation was `ProbationDate` → `DateOfPermanent`, two columns with
+nothing reading them on a schedule, so people stayed "on probation" for years. The queue
+sorts overdue first and puts **"no end date set" second, above "due soon"** — that is the
+case that silently never surfaces, and it is the one the old system lost people in. The
+decision writes to `probation_reviews` and to the employee row in one transaction, so an
+extension leaves a trail instead of overwriting the previous date.
+
+**Files live in Postgres** as `bytea`, content-addressed by sha256. On a single VPS that
+means one backup covers the database and the documents together and a restore cannot leave
+rows pointing at files that are gone. Uploads are typed by sniffing their bytes, never by
+the browser's claim — HTML renamed to `.png` is refused — and `/api/files/[id]` decides
+access from what the file is *used for*, so a document hidden from an employee cannot be
+fetched by them either.
+
+```bash
+pnpm check:people   # 31 assertions: expiry and probation boundaries, uploads, loops, tenancy
+```
+
+A second one, caught by signing in as two people on the same browser: the file route
+originally sent `Cache-Control: private, max-age=3600`. An HTTP cache is keyed by URL
+alone, so after an administrator opened a confidential document, the next person to sign in
+on that machine could read it straight out of the browser cache — an ordinary fetch of the
+same URL returned **200 instead of 404**. It now sends `private, no-cache, must-revalidate`
+with `Vary: Cookie`, so every reuse is re-authorised; the ETag makes that a 0-byte 304.
+
+One bug this caught, worth recording: `daysBetween` is **inclusive** — the same day is 1,
+not 0 — because that is what leave counting needs. Reused for a countdown it made a
+document that expired yesterday read as *zero days remaining*, so the reminder would never
+have fired. The fix was a separate, honestly named `daysUntil`, not a change to the one the
+leave engine depends on.
+
+---
+
+## Scale
+
+The recovered production database says what this has to survive: **459 employees,
+52 branches, 19 departments, and 1.74 M attendance rows over ten years** — 2.1 M
+rows and 576 MB in total. The demo database has 24 employees and 9 K attendance
+rows, three orders of magnitude off, which is exactly the gap where a page that
+feels instant in development becomes unusable in production.
+
+`./bela bench --build` generates a production-shaped dataset (459 employees,
+335 K attendance days, two years) in a scratch database and measures the queries
+the hot pages actually issue.
+
+**What it found.** Every query was fast — the slowest, the whole-organisation
+month read, was 61 ms. The pages were not:
+
+| Page | Before | After |
+|---|---|---|
+| `/attendance/monthly` | 1,273 ms · **7.2 MB** | **187 ms · 588 KB** |
+| `/attendance/register` | 326 ms · 1.5 MB | **116 ms · 268 KB** |
+
+The monthly sheet renders one cell per employee per day: 459 × 31 = 14,229 cells,
+and it grew linearly — 15 MB at a thousand staff. The queries were never the
+problem, the payload was. Both pages are now paginated by employee, and the
+attendance read is restricted to the employees on the page, turning a
+14,000-row scan into a few hundred.
+
+**The tiles above both tables stay organisation-wide**, computed as a separate
+aggregate in SQL. Summing the visible page would make "absent days" change as you
+page through — a report that describes nothing, and the most common way
+pagination quietly corrupts a total. Verified against the database: the rendered
+tiles read absent 2, late 440, overtime 8.4 h; SQL over the same Bikram Sambat
+month returns 2, 440, and 505 minutes.
+
+A note on measuring: in development mode the same page took **33 seconds**. That
+is a dev-server artefact, not the product — React Server Components render far
+slower unoptimised. The numbers above are from `pnpm build && pnpm start`, which
+is the only mode worth quoting.
+
+---
 
 ## Development automation
 

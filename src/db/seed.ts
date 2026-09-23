@@ -9,7 +9,7 @@
  * Data is invented. Structure is not: leave types, statutory identifiers and the
  * fiscal calendar follow Nepali practice, matching what the legacy system modelled.
  */
-import { and, eq, sql } from "drizzle-orm";
+import { and, eq, gte, sql } from "drizzle-orm";
 import { db } from "./client";
 import {
   auditLog,
@@ -42,6 +42,7 @@ import {
   shiftAssignments,
   shifts,
 } from "./schema/attendance";
+import { attendanceDevices, deviceEnrolments, devicePunches } from "./schema/devices";
 import { seedAttendance } from "./seed-attendance";
 import {
   adToBs,
@@ -62,12 +63,30 @@ function log(step: string, detail = "") {
   console.log(`  ${step.padEnd(26)} ${detail}`);
 }
 
+
+/** A stable pseudo-serial, so re-seeding does not invent a new one each time. */
+function hashCode(value: string): number {
+  let h = 0;
+  for (let i = 0; i < value.length; i++) h = (h * 31 + value.charCodeAt(i)) | 0;
+  return h;
+}
+
+/** "2026-09-18" + "09:03:00" -> a local Date, with no timezone reinterpretation. */
+function at(dateIso: string, time: string): Date {
+  const [y, m, d] = dateIso.split("-").map(Number);
+  const [hh, mm, ss] = time.split(":").map(Number);
+  return new Date(y, m - 1, d, hh, mm, ss ?? 0);
+}
+
 async function main() {
   console.log(`\nSeeding ${ORG_CODE}${RESET ? " (reset)" : ""}\n`);
 
   if (RESET) {
     // order matters: children before parents
     await db.delete(approvalSteps);
+    await db.delete(devicePunches);
+    await db.delete(deviceEnrolments);
+    await db.delete(attendanceDevices);
     await db.delete(attendanceRequests);
     await db.delete(attendanceDays);
     await db.delete(shiftAssignments);
@@ -753,6 +772,86 @@ async function main() {
 
   // ---------------------------------------------------------------- balances
   const allEmployees = [...empByCode.values()];
+
+  /*
+   * ------------------------------------------------- probation & documents
+   *
+   * Both features are about dates falling due, so a demo dataset where every
+   * date is comfortably in the future demonstrates nothing. These spread
+   * deliberately across every state the screens can show — overdue, due, not
+   * scheduled at all, expired, expiring — because the states that matter are
+   * the ones a fixture is most likely to leave untested.
+   *
+   * Everything is relative to today, so the dataset keeps meaning something as
+   * the calendar moves rather than quietly ageing into "all overdue".
+   */
+  const probationPlan: { code: string; endsIn: number | null }[] = [
+    { code: "EMP019", endsIn: -22 }, // overdue: the case nobody was ever told about
+    { code: "EMP020", endsIn: 9 }, // due inside the review window
+    { code: "EMP021", endsIn: 74 }, // upcoming
+    { code: "EMP022", endsIn: null }, // on probation with no end date at all
+  ];
+
+  for (const plan of probationPlan) {
+    const emp = empByCode.get(plan.code);
+    if (!emp) continue;
+    await db
+      .update(employees)
+      .set({
+        status: "probation",
+        probationEndDate: plan.endsIn === null ? null : addDays(today, plan.endsIn),
+        confirmationDate: null,
+      })
+      .where(eq(employees.id, emp.id));
+  }
+  log("probation", `${probationPlan.length} reviews across overdue, due, upcoming and unscheduled`);
+
+  const docPlan = [
+    { code: "EMP002", kind: "passport" as const, title: "Passport", expiresIn: -18, status: "verified" as const },
+    { code: "EMP013", kind: "contract" as const, title: "Fixed-term contract 2082/83", expiresIn: 21, status: "verified" as const },
+    { code: "EMP012", kind: "certificate" as const, title: "Boiler operator licence", expiresIn: 44, status: "pending" as const },
+    { code: "EMP017", kind: "pan" as const, title: "PAN certificate", expiresIn: null, status: "verified" as const },
+    { code: "EMP019", kind: "citizenship" as const, title: "Citizenship certificate", expiresIn: null, status: "pending" as const },
+    { code: "EMP020", kind: "contract" as const, title: "Probation appointment letter", expiresIn: 9, status: "pending" as const },
+    { code: "EMP004", kind: "certificate" as const, title: "Forklift operator certificate", expiresIn: -3, status: "rejected" as const },
+    { code: "EMP007", kind: "passport" as const, title: "Passport", expiresIn: 300, status: "verified" as const },
+  ];
+
+  const lifecycleDocs = docPlan.flatMap((d) => {
+    const emp = empByCode.get(d.code);
+    if (!emp) return [];
+    return [
+      {
+        orgId,
+        employeeId: emp.id,
+        kind: d.kind,
+        title: d.title,
+        referenceNumber: `${d.kind.toUpperCase()}-${emp.employeeCode.slice(-4)}`,
+        issuedOn: addDays(today, -730),
+        expiresOn: d.expiresIn === null ? null : addDays(today, d.expiresIn),
+        isVisibleToEmployee: true,
+        status: d.status,
+        reviewedBy: d.status === "pending" ? null : "Sita Karki",
+        reviewedAt: d.status === "pending" ? null : new Date(),
+        reviewNote:
+          d.status === "rejected" ? "Scan is cut off at the expiry date — please re-send." : null,
+        uploadedBy: "HR Department",
+      },
+    ];
+  });
+
+  const existingLifecycleDocs = await db
+    .select({ employeeId: employeeDocuments.employeeId, title: employeeDocuments.title })
+    .from(employeeDocuments);
+  const lifecycleSeen = new Set(
+    existingLifecycleDocs.map((d) => `${d.employeeId}:${d.title}`),
+  );
+  const newLifecycleDocs = lifecycleDocs.filter(
+    (d) => !lifecycleSeen.has(`${d.employeeId}:${d.title}`),
+  );
+  if (newLifecycleDocs.length) await db.insert(employeeDocuments).values(newLifecycleDocs);
+  log("documents", `${lifecycleDocs.length} with expiry dates across expired, expiring and valid`);
+
   const balanceRows = [];
   for (const emp of allEmployees) {
     for (const lt of typeRows) {
@@ -910,6 +1009,226 @@ async function main() {
     days: 75,
     log,
   });
+
+  /*
+   * ------------------------------------------------------------ devices
+   *
+   * Four readers, because the interesting cases are all about difference:
+   * a door reader that alternates, a dedicated exit, a second site, and a
+   * cloud kiosk that pushes over HTTP. One of them is deliberately left
+   * silent so the health column has something to report.
+   *
+   * The punches are derived from the attendance rows that were just
+   * generated, so the raw log and the register agree — the point of the
+   * demo is the pipeline, and it would prove nothing if the two were
+   * invented independently.
+   */
+  const deviceDefs = [
+    {
+      code: "GATE-01",
+      name: "Head office main gate",
+      branch: "HO",
+      location: "Reception, ground floor",
+      kind: "fingerprint" as const,
+      connection: "tcp_ip" as const,
+      direction: "alternating" as const,
+      vendor: "ZKTeco",
+      model: "iFace 302",
+      ip: "192.168.10.41",
+      port: 4370,
+      seenMinutesAgo: 3,
+    },
+    {
+      code: "GATE-02",
+      name: "Head office exit turnstile",
+      branch: "HO",
+      location: "Rear exit",
+      kind: "card" as const,
+      connection: "tcp_ip" as const,
+      direction: "out_only" as const,
+      vendor: "Matrix",
+      model: "COSEC VEGA",
+      ip: "192.168.10.42",
+      port: 4370,
+      seenMinutesAgo: 11,
+    },
+    {
+      code: "PLANT-01",
+      name: "Biratnagar plant floor reader",
+      branch: "BRT",
+      location: "Shop floor entrance",
+      kind: "face" as const,
+      connection: "tcp_ip" as const,
+      direction: "alternating" as const,
+      vendor: "Realtime",
+      model: "T59",
+      ip: "10.20.0.15",
+      port: 4370,
+      // Two days without a word: the case the health column exists for.
+      seenMinutesAgo: 60 * 49,
+    },
+    {
+      code: "KIOSK-01",
+      name: "Web kiosk — Pokhara office",
+      branch: "PKR",
+      location: "Admin desk",
+      kind: "kiosk" as const,
+      connection: "cloud_api" as const,
+      direction: "device_reported" as const,
+      vendor: "Bela",
+      model: "Browser kiosk",
+      ip: null,
+      port: null,
+      seenMinutesAgo: 27,
+    },
+  ];
+
+  const deviceByCode = new Map<string, string>();
+  for (const d of deviceDefs) {
+    const [created] = await db
+      .insert(attendanceDevices)
+      .values({
+        orgId,
+        code: d.code,
+        name: d.name,
+        branchId: branchByCode.get(d.branch) ?? null,
+        location: d.location,
+        kind: d.kind,
+        connection: d.connection,
+        direction: d.direction,
+        status: "active",
+        vendor: d.vendor,
+        model: d.model,
+        serialNumber: `SN-${d.code}-${String(Math.abs(hashCode(d.code)) % 100000).padStart(5, "0")}`,
+        ipAddress: d.ip,
+        port: d.port,
+        syncIntervalMinutes: 15,
+        lastSeenAt: new Date(Date.now() - d.seenMinutesAgo * 60_000),
+        lastSyncAt: new Date(Date.now() - d.seenMinutesAgo * 60_000),
+      })
+      .onConflictDoNothing()
+      .returning({ id: attendanceDevices.id });
+
+    if (created) deviceByCode.set(d.code, created.id);
+    else {
+      const [existing] = await db
+        .select({ id: attendanceDevices.id })
+        .from(attendanceDevices)
+        .where(and(eq(attendanceDevices.orgId, orgId), eq(attendanceDevices.code, d.code)))
+        .limit(1);
+      if (existing) deviceByCode.set(d.code, existing.id);
+    }
+  }
+
+  /*
+   * Enrolment numbers run 1..n on the main gate, which is how a reader is
+   * actually configured. Two people are deliberately left unenrolled so the
+   * "cannot be recognised" warning on the register has a real cause.
+   */
+  const enrolable = allEmployees.slice(0, Math.max(0, allEmployees.length - 2));
+  const enrolmentRows: (typeof deviceEnrolments.$inferInsert)[] = [];
+  const numberByEmployee = new Map<string, string>();
+
+  enrolable.forEach((emp, i) => {
+    const number = String(i + 1);
+    numberByEmployee.set(emp.id, number);
+    const gate = deviceByCode.get("GATE-01");
+    if (gate) {
+      enrolmentRows.push({ orgId, deviceId: gate, employeeId: emp.id, enrollNumber: number });
+    }
+    // The plant reader only knows the people who work there.
+    const plant = deviceByCode.get("PLANT-01");
+    if (plant && i % 3 === 0) {
+      enrolmentRows.push({ orgId, deviceId: plant, employeeId: emp.id, enrollNumber: number });
+    }
+  });
+
+  if (enrolmentRows.length) {
+    await db.insert(deviceEnrolments).values(enrolmentRows).onConflictDoNothing();
+  }
+
+  /*
+   * Punches for the last three days, read back off the attendance rows so the
+   * raw log corroborates the register instead of contradicting it.
+   */
+  const punchFrom = addDays(today, -3);
+  const recentDays = await db
+    .select({
+      employeeId: attendanceDays.employeeId,
+      date: attendanceDays.date,
+      checkIn: attendanceDays.checkIn,
+      checkOut: attendanceDays.checkOut,
+    })
+    .from(attendanceDays)
+    .where(and(eq(attendanceDays.orgId, orgId), gte(attendanceDays.date, punchFrom)));
+
+  const gateId = deviceByCode.get("GATE-01");
+  const exitId = deviceByCode.get("GATE-02");
+  const punchRows: (typeof devicePunches.$inferInsert)[] = [];
+
+  if (gateId && exitId) {
+    for (const day of recentDays) {
+      const number = numberByEmployee.get(day.employeeId);
+      if (!number) continue;
+
+      if (day.checkIn) {
+        punchRows.push({
+          orgId,
+          deviceId: gateId,
+          enrollNumber: number,
+          employeeId: day.employeeId,
+          punchedAt: at(day.date, day.checkIn),
+          punchDate: day.date,
+          direction: "unknown" as const,
+          status: "pending" as const,
+          payload: { source: "seed", device: "GATE-01" },
+        });
+      }
+      if (day.checkOut) {
+        punchRows.push({
+          orgId,
+          deviceId: exitId,
+          enrollNumber: number,
+          employeeId: day.employeeId,
+          punchedAt: at(day.date, day.checkOut),
+          punchDate: day.date,
+          // The exit turnstile is out_only, so its readings are unambiguous.
+          direction: "out" as const,
+          status: "pending" as const,
+          payload: { source: "seed", device: "GATE-02" },
+        });
+      }
+    }
+
+    /*
+     * Three readings from numbers nobody is enrolled as — a contractor, a
+     * visitor, a finger enrolled on the device but never registered here.
+     * This is the most common real complaint ("the machine did not record
+     * me") and the register should surface it on day one.
+     */
+    for (const [i, stray] of ["901", "902", "903"].entries()) {
+      punchRows.push({
+        orgId,
+        deviceId: gateId,
+        enrollNumber: stray,
+        employeeId: null,
+        punchedAt: at(addDays(today, -1), `0${8 + i}:5${i}:00`),
+        punchDate: addDays(today, -1),
+        direction: "unknown" as const,
+        status: "unmatched" as const,
+        payload: { source: "seed", note: "no enrolment for this number" },
+      });
+    }
+  }
+
+  if (punchRows.length) {
+    await db.insert(devicePunches).values(punchRows).onConflictDoNothing();
+  }
+
+  log(
+    "devices",
+    `${deviceDefs.length} readers, ${enrolmentRows.length} enrolments, ${punchRows.length} punches awaiting processing`,
+  );
 
   await db.insert(auditLog).values({
     orgId,

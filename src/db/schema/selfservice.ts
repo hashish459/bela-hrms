@@ -30,6 +30,7 @@ import {
   uuid,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./core";
+import { files } from "./files";
 import { branches, departments } from "./org";
 import { employees } from "./hr";
 
@@ -137,6 +138,28 @@ export const documentKind = pgEnum("employee_document_kind", [
  * once when the document is filed, not an omission somebody has to remember
  * every time a screen is written.
  */
+/**
+ * Whether HR has checked the document against the original.
+ *
+ * The legacy `EmpDocumentInfo` carried an `ApprovalStatus` joined to the same
+ * action table the leave workflow used, which is the clue that mattered when
+ * reverse-engineering it: a personnel document was a governed record, not a file
+ * somebody dropped in a folder. A scanned citizenship certificate that nobody
+ * has verified should not look identical to one that has been checked against
+ * the original, because payroll and statutory filing rely on the number on it.
+ *
+ * Three states rather than the legacy free-form action id: the extra ones there
+ * were leave transitions that a document can never be in.
+ */
+export const documentStatus = pgEnum("employee_document_status", [
+  /** Filed, not yet checked. The default for anything an employee uploads. */
+  "pending",
+  /** Checked against the original by somebody holding `hr.document.manage`. */
+  "verified",
+  /** Checked and wrong — illegible, expired on arrival, or not what it claims. */
+  "rejected",
+]);
+
 export const employeeDocuments = pgTable(
   "employee_documents",
   {
@@ -149,19 +172,40 @@ export const employeeDocuments = pgTable(
       .references(() => employees.id, { onDelete: "cascade" }),
     kind: documentKind("kind").notNull(),
     title: text("title").notNull(),
-    /** Where the file lives. Storage is deliberately not this table's business. */
+    /**
+     * The uploaded file. Nullable because a document can be recorded before the
+     * scan arrives — a contract whose signed copy is still in the post is a real
+     * record with a real expiry date, and refusing to file it until somebody
+     * finds a scanner is how expiry tracking ends up incomplete.
+     */
+    fileId: uuid("file_id").references(() => files.id, { onDelete: "set null" }),
+    /** A document hosted elsewhere. Kept for records migrated from the old share. */
     fileUrl: text("file_url"),
     referenceNumber: text("reference_number"),
     issuedOn: date("issued_on"),
-    /** Passports and contracts expire; the desk warns before they do. */
+    /** Passports and contracts expire; the register warns before they do. */
     expiresOn: date("expires_on"),
     isVisibleToEmployee: boolean("is_visible_to_employee").notNull().default(true),
+
+    status: documentStatus("status").notNull().default("pending"),
+    reviewedBy: text("reviewed_by"),
+    reviewedAt: timestamp("reviewed_at"),
+    /** Why it was rejected, or a note made while verifying. */
+    reviewNote: text("review_note"),
+
     uploadedBy: text("uploaded_by"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
   },
   (t) => [
     index("employee_documents_employee_idx").on(t.employeeId),
+    /*
+     * The expiry register reads "everything in this organisation expiring before
+     * date X, soonest first". Leading with orgId and then expiresOn lets that be
+     * an index range scan rather than a scan of every document ever filed.
+     */
     index("employee_documents_expiry_idx").on(t.orgId, t.expiresOn),
+    index("employee_documents_status_idx").on(t.orgId, t.status),
   ],
 );
 
@@ -244,6 +288,7 @@ export const employeeQualificationsRelations = relations(employeeQualifications,
 
 export const employeeDocumentsRelations = relations(employeeDocuments, ({ one }) => ({
   employee: one(employees, { fields: [employeeDocuments.employeeId], references: [employees.id] }),
+  file: one(files, { fields: [employeeDocuments.fileId], references: [files.id] }),
 }));
 
 export const noticesRelations = relations(notices, ({ one, many }) => ({

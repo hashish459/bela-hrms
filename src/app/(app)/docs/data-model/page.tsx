@@ -86,7 +86,7 @@ export default async function DataModelPage() {
           title="How the tables relate"
           lead="Everything hangs off an organisation; almost every figure also hangs off a fiscal year."
         >
-          <Figure caption="Core entities. Solid lines are foreign keys; the dashed line is the generic approval link, which is keyed by (entityType, entityId) rather than by a foreign key.">
+          <Figure caption="Core entities. Solid lines are foreign keys; dashed lines are the generic approval link — keyed by (entityType, entityId) rather than by a foreign key — and the two links that are nullable by design, because a document can be filed before its scan arrives.">
             <svg viewBox="0 0 860 470" width="860" height="470" role="img" aria-label="Entity relationship diagram">
               <ArrowDefs />
 
@@ -101,6 +101,10 @@ export default async function DataModelPage() {
               <Pill x={360} y={180} w={150} label="branches · depts" sub="placement" tone="sunk" />
               <Pill x={580} y={180} w={160} label="user_accounts" sub="login ↔ employee" tone="sunk" />
 
+              <Pill x={10} y={90} w={90} label="files" sub="bytea" tone="sunk" />
+              <Pill x={580} y={280} w={160} label="employee_documents" sub="with expiry" />
+              <Pill x={640} y={10} w={170} label="probation_reviews" sub="the decision ledger" tone="warn" />
+
               <Pill x={70} y={280} w={160} label="leave_types" sub="the policy" />
               <Pill x={260} y={280} w={160} label="leave_balances" sub="per year" />
               <Pill x={450} y={280} w={160} label="leave_requests" />
@@ -111,6 +115,9 @@ export default async function DataModelPage() {
               <Pill x={650} y={380} w={160} label="attendance_requests" />
 
               <Arrow from={[400, 44]} to={[400, 86]} />
+              <Arrow from={[660, 44]} to={[480, 86]} label="outcome" dashed />
+              <Arrow from={[420, 124]} to={[640, 276]} label="documents" />
+              <Arrow from={[600, 314]} to={[100, 120]} label="file_id" dashed />
               <Arrow from={[360, 44]} to={[210, 86]} />
               <Arrow from={[490, 44]} to={[650, 86]} />
 
@@ -183,6 +190,37 @@ export default async function DataModelPage() {
                   Employee codes, branch codes, leave type codes and role codes are all{" "}
                   <code className="font-mono text-xs">unique (org_id, code)</code>. Two
                   organisations can both have an EMP001.
+                </>,
+              ],
+              [
+                "A document is verified, or it is not",
+                <>
+                  <code className="font-mono text-xs">employee_documents.status</code> is
+                  pending, verified or rejected, and editing a verified document resets it to
+                  pending. A verification states that somebody checked the scan against the
+                  original; once the scan changes, that statement no longer refers to anything.
+                </>,
+              ],
+              [
+                "Confirmation is a decision, not just a date",
+                <>
+                  <code className="font-mono text-xs">employees.confirmation_date</code> stays the
+                  field every other screen reads, and{" "}
+                  <code className="font-mono text-xs">probation_reviews</code> records how it got
+                  there — who decided, when, and why probation was extended. The legacy schema had
+                  the dates and nothing else, so an extension silently overwrote the previous one.
+                </>,
+              ],
+              [
+                "Uploaded bytes live in Postgres",
+                <>
+                  <code className="font-mono text-xs">files.content</code> is a{" "}
+                  <code className="font-mono text-xs">bytea</code>, content-addressed by{" "}
+                  <code className="font-mono text-xs">sha256</code> so the same scan filed twice is
+                  stored once. One backup covers the database and the documents together, and a
+                  restore cannot leave rows pointing at files that are no longer there. Revisit
+                  this past a few gigabytes; only <code className="font-mono text-xs">lib/storage.ts</code>{" "}
+                  would change.
                 </>,
               ],
               [

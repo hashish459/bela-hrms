@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
+import { and, asc, count, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
@@ -13,6 +13,8 @@ import {
   type AttendanceStatus,
 } from "@/lib/attendance";
 import { addDays, adToBs, isSaturday, todayInNepal } from "@/lib/bs";
+import { offsetPage, PAGE_SIZE } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import { BsMonthNav, bsMonthBounds } from "@/components/bs-month-nav";
 import { Card, EmptyState, PageHeader, StatTile } from "@/components/ui";
 import { AttendanceLegend } from "../sheet";
@@ -40,36 +42,90 @@ export default async function MonthlySheetPage({ searchParams }: PageProps<"/att
   const month = { year: Number(params.y) || nowBs.year, month: Number(params.m) || nowBs.month };
   const { from, to } = bsMonthBounds(month);
 
-  const [staff, records, hols, leaves] = await Promise.all([
-    db
-      .select({
-        id: employees.id,
-        code: employees.employeeCode,
-        name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
-        department: departments.name,
-      })
-      .from(employees)
-      .leftJoin(departments, eq(departments.id, employees.departmentId))
-      .where(
-        and(
-          eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
-          lte(employees.dateOfJoin, to),
-        ),
-      )
-      .orderBy(asc(employees.employeeCode)),
+  /*
+   * Paginated by employee.
+   *
+   * This sheet renders one cell per employee per day. Unpaginated at the
+   * production headcount that is 459 x 31 = 14,229 cells and a 7.2 MB HTML
+   * document — measured, not estimated — and it grows linearly: 15 MB at a
+   * thousand staff. The queries were never the problem; the payload was.
+   *
+   * Two consequences the implementation has to respect:
+   *
+   *   - the attendance rows are fetched only for the employees on this page,
+   *     which turns a 14,000-row read into a few hundred;
+   *   - the tiles above the table stay ORGANISATION-wide. Summing the visible
+   *     page would make "absent days" change as you page through, which is the
+   *     classic way a paginated report starts lying.
+   */
+  const employedFilter = and(
+    eq(employees.orgId, viewer.orgId),
+    sql`${employees.status} = ANY(ARRAY[${sql.join(
+      EMPLOYED_STATUSES.map((s) => sql`${s}`),
+      sql`, `,
+    )}]::employee_status[])`,
+    lte(employees.dateOfJoin, to),
+  );
 
+  const [{ n: staffTotal }] = await db
+    .select({ n: count() })
+    .from(employees)
+    .where(employedFilter);
+
+  const page = offsetPage({
+    page: Array.isArray(params.page) ? params.page[0] : params.page,
+    total: Number(staffTotal),
+    defaultSize: PAGE_SIZE.compact,
+  });
+
+  const staff = await db
+    .select({
+      id: employees.id,
+      code: employees.employeeCode,
+      name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
+      department: departments.name,
+    })
+    .from(employees)
+    .leftJoin(departments, eq(departments.id, employees.departmentId))
+    .where(employedFilter)
+    .orderBy(asc(employees.employeeCode))
+    .limit(page.limit)
+    .offset(page.offset);
+
+  const staffIds = staff.map((s) => s.id);
+
+  const [records, hols, leaves, [orgTotals]] = await Promise.all([
+    staffIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({
+            employeeId: attendanceDays.employeeId,
+            date: attendanceDays.date,
+            status: attendanceDays.status,
+            lateMinutes: attendanceDays.lateMinutes,
+            otMinutes: attendanceDays.otMinutes,
+            workedMinutes: attendanceDays.workedMinutes,
+          })
+          .from(attendanceDays)
+          .where(
+            and(
+              eq(attendanceDays.orgId, viewer.orgId),
+              gte(attendanceDays.date, from),
+              lte(attendanceDays.date, to),
+              inArray(attendanceDays.employeeId, staffIds),
+            ),
+          ),
+
+    holidayMap(viewer.orgId, from, to),
+    leaveMap(viewer.orgId, from, to, staffIds),
+
+    // Aggregated in the database over every employee, so the tiles describe the
+    // month rather than the page.
     db
       .select({
-        employeeId: attendanceDays.employeeId,
-        date: attendanceDays.date,
-        status: attendanceDays.status,
-        lateMinutes: attendanceDays.lateMinutes,
-        otMinutes: attendanceDays.otMinutes,
-        workedMinutes: attendanceDays.workedMinutes,
+        absent: sql<number>`count(*) FILTER (WHERE ${attendanceDays.status} = 'absent')::int`,
+        late: sql<number>`count(*) FILTER (WHERE ${attendanceDays.lateMinutes} > 0)::int`,
+        ot: sql<number>`coalesce(sum(${attendanceDays.otMinutes}), 0)::int`,
       })
       .from(attendanceDays)
       .where(
@@ -79,9 +135,6 @@ export default async function MonthlySheetPage({ searchParams }: PageProps<"/att
           lte(attendanceDays.date, to),
         ),
       ),
-
-    holidayMap(viewer.orgId, from, to),
-    leaveMap(viewer.orgId, from, to),
   ]);
 
   const dates: string[] = [];
@@ -113,9 +166,6 @@ export default async function MonthlySheetPage({ searchParams }: PageProps<"/att
     };
   });
 
-  const orgAbsent = rows.reduce((a, r) => a + r.absent, 0);
-  const orgLate = rows.reduce((a, r) => a + r.lateDays, 0);
-  const orgOt = rows.reduce((a, r) => a + r.otMinutes, 0);
 
   return (
     <>
@@ -126,10 +176,30 @@ export default async function MonthlySheetPage({ searchParams }: PageProps<"/att
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="Employees" value={rows.length} tone="accent" />
-        <StatTile label="Absent days" value={orgAbsent} tone={orgAbsent > 0 ? "danger" : "neutral"} />
-        <StatTile label="Late arrivals" value={orgLate} tone={orgLate > 0 ? "warn" : "neutral"} />
-        <StatTile label="Overtime" value={`${(orgOt / 60).toFixed(1)}h`} tone="info" />
+        <StatTile
+          label="Employees"
+          value={staffTotal}
+          sub={page.pageCount > 1 ? `showing ${page.from}-${page.to}` : undefined}
+          tone="accent"
+        />
+        <StatTile
+          label="Absent days"
+          value={orgTotals?.absent ?? 0}
+          sub="whole organisation"
+          tone={(orgTotals?.absent ?? 0) > 0 ? "danger" : "neutral"}
+        />
+        <StatTile
+          label="Late arrivals"
+          value={orgTotals?.late ?? 0}
+          sub="whole organisation"
+          tone={(orgTotals?.late ?? 0) > 0 ? "warn" : "neutral"}
+        />
+        <StatTile
+          label="Overtime"
+          value={`${((orgTotals?.ot ?? 0) / 60).toFixed(1)}h`}
+          sub="whole organisation"
+          tone="info"
+        />
       </div>
 
       <div className="mt-4">
@@ -219,6 +289,8 @@ export default async function MonthlySheetPage({ searchParams }: PageProps<"/att
                 ))}
               </tbody>
             </table>
+
+            <OffsetPagination page={page} params={params} label="employees" />
           </div>
         )}
       </div>

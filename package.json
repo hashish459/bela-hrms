@@ -21,11 +21,15 @@
     "db:reset": "tsx --env-file=.env src/db/seed.ts --reset",
     "admin:unlock": "tsx --conditions=react-server --env-file=.env scripts/admin-unlock.ts",
     "check:attendance": "tsx --conditions=react-server --env-file=.env scripts/check-attendance-flow.ts",
+    "check:devices": "tsx --conditions=react-server --env-file=.env scripts/check-devices.ts",
     "check:isolation": "tsx --conditions=react-server --env-file=.env scripts/check-module-isolation.ts",
     "check:leave": "tsx --conditions=react-server --env-file=.env scripts/check-leave-effects.ts",
     "check:org": "tsx --conditions=react-server --env-file=.env scripts/check-org-structure.ts",
     "check:pagination": "tsx --env-file=.env scripts/check-pagination.ts",
-    "check:self": "tsx --conditions=react-server --env-file=.env scripts/check-self-service.ts"
+    "check:people": "tsx --conditions=react-server --env-file=.env scripts/check-people-records.ts",
+    "check:self": "tsx --conditions=react-server --env-file=.env scripts/check-self-service.ts",
+    "bench": "node scripts/dev/bench.mjs",
+    "bench:build": "node scripts/dev/bench.mjs --build"
   },
   "dependencies": {
     "@tanstack/react-table": "^9.2.4",

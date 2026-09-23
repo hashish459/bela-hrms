@@ -13,6 +13,8 @@ const CHAPTERS = [
   { id: "leave", label: "Leave" },
   { id: "approving", label: "Approving" },
   { id: "employees", label: "Employees" },
+  { id: "documents", label: "Documents" },
+  { id: "confirmations", label: "Confirmations" },
   { id: "organisation", label: "Organisation" },
   { id: "administration", label: "Administration" },
   { id: "appearance", label: "Appearance" },
@@ -33,6 +35,7 @@ export default async function ManualPage() {
   const isApprover =
     can(viewer, "leave.request.approve") || can(viewer, "attendance.request.approve");
   const isHr = can(viewer, "hr.employee.view");
+  const isDocuments = can(viewer, "hr.document.manage");
   const isSetup = can(viewer, "setup.structure.view");
   const isAdmin = can(viewer, "admin.user.view") || can(viewer, "admin.role.manage");
 
@@ -314,14 +317,127 @@ export default async function ManualPage() {
               reporting line.
             </p>
             <p>
-              The reporting line is what routes approvals, so it matters more than it looks:{" "}
-              <strong>Employees › Reporting Lines</strong> shows the tree and flags anyone without a
-              supervisor. Someone with no supervisor has nowhere for their requests to go.
+              Open anybody from the list to see their record in full: employment and placement,
+              statutory identifiers, leave balances, what is on file, and anything falling due.
+              Deadlines are shown at the top rather than buried in a tab, because the way a
+              personnel record fails is not that the data is missing — it is that nobody looked at
+              it in time.
+            </p>
+            <p>
+              <strong>The photograph.</strong> Hover the circle on a profile and use the camera
+              button. The picture is resized in your browser before it is sent, so a six-megabyte
+              phone photo arrives as a few tens of kilobytes; you do not need to shrink it first.
+              JPEG, PNG and WebP are accepted, and the file is checked by its actual contents
+              rather than its name. <em>Remove</em> clears it and the initials come back.
+            </p>
+            <p>
+              <strong>Reporting lines.</strong> The line is what routes approvals, so it matters
+              more than it looks — level one is the direct supervisor, level two theirs, and
+              somebody with no supervisor has nowhere for their requests to go.{" "}
+              <strong>Employees › Reporting Lines</strong> charts the whole organisation and counts
+              how many people are unassigned or report to somebody who has left.
+            </p>
+            <p>
+              Press <strong>Edit reporting lines</strong> to change them in place. Each person gets
+              a supervisor list that leaves out themselves and everybody already beneath them,
+              because moving somebody under their own subordinate would close a loop — an approval
+              that can never be routed. The same rule is enforced again when the change is saved.
             </p>
           </Prose>
         </DocSection>
 
-        <DocSection id="organisation" title="7 · Organisation">
+        <DocSection id="documents" title="7 · Documents">
+          <div className="mb-3">
+            <Access ok={isDocuments} need="hr.document.manage" />
+          </div>
+          <Prose>
+            <p>
+              <strong>Employees › Documents</strong> is the register of contracts, certificates and
+              identity papers held against each person — and, more usefully, of the ones that are
+              about to stop being valid. You can also file a document directly from the Documents
+              card on somebody&rsquo;s profile.
+            </p>
+          </Prose>
+          <div className="mt-3">
+            <DefTable
+              rows={[
+                [
+                  "Filing one",
+                  "Type, title, reference number, issue and expiry dates, and optionally a scan — JPEG, PNG, WebP or PDF up to 5 MB. Leave the expiry blank for anything that does not expire. A document can be filed before its scan arrives; the register marks which ones have no file attached.",
+                ],
+                [
+                  "Expiry reminders",
+                  "The tiles and the Renewal reminders card count the whole organisation, not the page you are looking at. Anything expired or expiring within sixty days is flagged, soonest first.",
+                ],
+                [
+                  "Verifying",
+                  "A newly filed document is pending until somebody checks the scan against the original and marks it verified. Rejecting one asks for a reason, and the employee sees that reason on their own profile so they know what to re-send.",
+                ],
+                [
+                  "Editing resets a verification",
+                  "Changing a verified document puts it back to pending. The tick said somebody checked that scan; once the scan or the reference changes, it no longer refers to anything.",
+                ],
+                [
+                  "Visible to the employee",
+                  "On by default. Uncheck it for anything held on file but not for their eyes — an investigation note, a reference. Hidden documents never appear on the employee desk, and the file itself cannot be fetched by them either.",
+                ],
+                [
+                  "Sharing a view",
+                  "The filters live in the address bar, so “everything expiring soon” is a link you can send to whoever has to chase it.",
+                ],
+              ]}
+            />
+          </div>
+        </DocSection>
+
+        <DocSection id="confirmations" title="8 · Confirmations">
+          <div className="mb-3">
+            <Access ok={isHr} need="hr.employee.view" />
+          </div>
+          <Prose>
+            <p>
+              <strong>Employees › Confirmations</strong> lists everybody on probation, sorted so the
+              thing that has been waiting longest is at the top. Recording the decision needs
+              permission to edit employees; without it the queue is still readable.
+            </p>
+            <p>
+              People with <strong>no probation end date</strong> sort near the top rather than at
+              the bottom. Nothing will ever fall due for them, which is exactly how the previous
+              system lost track of staff for years at a time.
+            </p>
+          </Prose>
+          <div className="mt-3">
+            <Steps
+              items={[
+                {
+                  title: "Open the review in the row",
+                  body: "Press Review. The decision is taken in the table rather than on a separate screen, so a queue of fifteen is one sitting.",
+                },
+                {
+                  title: "Choose the outcome",
+                  body: "Confirm moves the person onto the permanent establishment from the effective date. Extend probation keeps them on probation until a new date you set. Do not confirm ends the engagement.",
+                },
+                {
+                  title: "Give the reason",
+                  body: "Optional when confirming, required for an extension or a termination — that is the decision somebody may be asked to justify later.",
+                },
+                {
+                  title: "Record it",
+                  body: "The employee record and the decision are written together, in one transaction. The decision stays on their profile under Probation history, with the date and who took it.",
+                },
+              ]}
+            />
+          </div>
+          <div className="mt-3">
+            <Callout tone="info" title="If somebody else got there first">
+              Two people working the queue at once is ordinary, not an edge case. If a decision has
+              already been recorded, the second attempt is refused with a message saying so rather
+              than overwriting it.
+            </Callout>
+          </div>
+        </DocSection>
+
+        <DocSection id="organisation" title="9 · Organisation">
           <div className="mb-3">
             <Access ok={isSetup} need="setup.structure.view" />
           </div>
@@ -351,7 +467,7 @@ export default async function ManualPage() {
           />
         </DocSection>
 
-        <DocSection id="administration" title="8 · Administration">
+        <DocSection id="administration" title="10 · Administration">
           <div className="mb-3">
             <Access ok={isAdmin} need="admin.user.view" />
           </div>

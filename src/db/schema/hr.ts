@@ -24,6 +24,7 @@ import {
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
 import { organizations } from "./core";
+import { files } from "./files";
 import { branches, departments, designations, employmentTypes, grades } from "./org";
 import {
   jobTitles,
@@ -158,6 +159,15 @@ export const employees = pgTable(
     bankAccountNumber: text("bank_account_number"),
     basicSalary: numeric("basic_salary", { precision: 14, scale: 2 }),
 
+    /**
+     * The passport photograph.
+     *
+     * `photoUrl` stays for a photograph hosted elsewhere — the legacy system
+     * stored a path onto a Windows share — and `photoFileId` points at a file
+     * uploaded through this product. A reader prefers the file and falls back to
+     * the URL, so neither source has to be migrated before the other works.
+     */
+    photoFileId: uuid("photo_file_id").references(() => files.id, { onDelete: "set null" }),
     photoUrl: text("photo_url"),
     notes: text("notes"),
 
@@ -202,6 +212,67 @@ export const employeeAssignments = pgTable(
   (t) => [index("employee_assignments_emp_idx").on(t.employeeId, t.effectiveFrom)],
 );
 
+/**
+ * Probation outcomes.
+ *
+ * The legacy system recorded confirmation as two columns on the employee row —
+ * `ProbationDate` and `DateOfPermanent` — which answers "is this person
+ * confirmed?" and nothing else. It cannot say who decided, on what evidence, or
+ * why somebody is still on probation eleven months after joining, because an
+ * extension simply overwrote the date and the previous one was gone.
+ *
+ * This is the decision ledger behind those columns. The employee row still
+ * carries the current answer, so every existing query keeps working; this table
+ * carries how it got there.
+ */
+export const probationOutcome = pgEnum("probation_outcome", [
+  /** Confirmed into the permanent establishment. */
+  "confirmed",
+  /** Probation runs longer; `newProbationEndDate` says until when. */
+  "extended",
+  /** Not confirmed — the engagement ends. */
+  "terminated",
+]);
+
+export const probationReviews = pgTable(
+  "probation_reviews",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+
+    /** The probation end date this review was answering. */
+    probationEndDate: date("probation_end_date"),
+    outcome: probationOutcome("outcome").notNull(),
+    /** The date the decision takes effect, which is not always the date it was made. */
+    effectiveDate: date("effective_date").notNull(),
+    /** Only meaningful for `extended`. */
+    newProbationEndDate: date("new_probation_end_date"),
+
+    /** Why. Required for anything other than a plain confirmation. */
+    remarks: text("remarks"),
+
+    decidedByUserId: text("decided_by_user_id"),
+    decidedByLabel: text("decided_by_label"),
+    decidedAt: timestamp("decided_at").notNull().defaultNow(),
+  },
+  (t) => [
+    index("probation_reviews_employee_idx").on(t.employeeId, t.decidedAt),
+    index("probation_reviews_org_idx").on(t.orgId, t.decidedAt),
+  ],
+);
+
+export const probationReviewsRelations = relations(probationReviews, ({ one }) => ({
+  employee: one(employees, {
+    fields: [probationReviews.employeeId],
+    references: [employees.id],
+  }),
+}));
+
 export const employeesRelations = relations(employees, ({ one, many }) => ({
   organization: one(organizations, { fields: [employees.orgId], references: [organizations.id] }),
   branch: one(branches, { fields: [employees.branchId], references: [branches.id] }),
@@ -225,6 +296,8 @@ export const employeesRelations = relations(employees, ({ one, many }) => ({
   }),
   reports: many(employees, { relationName: "employee_supervisor" }),
   assignments: many(employeeAssignments),
+  photo: one(files, { fields: [employees.photoFileId], references: [files.id] }),
+  probationReviews: many(probationReviews),
 }));
 
 export const employeeAssignmentsRelations = relations(employeeAssignments, ({ one }) => ({

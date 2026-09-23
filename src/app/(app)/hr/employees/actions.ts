@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
 import { auditLog } from "@/db/schema/core";
 import { requirePermission } from "@/lib/session";
+import { dropIfUnreferenced, PHOTO_MAX_BYTES, putFile } from "@/lib/storage";
 
 const optionalId = z
   .string()
@@ -28,7 +29,14 @@ const optionalDate = z
   .nullable()
   .refine((v) => v === null || /^\d{4}-\d{2}-\d{2}$/.test(v), "Use the date picker");
 
-export const employeeSchema = z.object({
+/*
+ * Not exported. In a `"use server"` file every export is registered as a
+ * server-action reference, and a non-function export makes the whole module
+ * throw "a use server file can only export async functions" the moment a client
+ * component imports anything from it. Nothing outside this file needs the
+ * schema, and keeping it local removes the trap.
+ */
+const employeeSchema = z.object({
   employeeCode: z
     .string()
     .trim()
@@ -195,4 +203,101 @@ export async function saveEmployee(
 
   revalidatePath("/hr/employees");
   return { ok: true, message: "Employee added.", employeeId: created.id };
+}
+
+/* ------------------------------------------------------------- photographs */
+
+export type PhotoState = { ok: boolean; message?: string };
+
+/**
+ * Replace an employee's photograph.
+ *
+ * The browser downscales before sending (see `photo-upload.tsx`), so what
+ * arrives here is already a few tens of kilobytes. The limit below is the
+ * backstop for anything that did not come through that form.
+ */
+export async function uploadEmployeePhoto(
+  employeeId: string,
+  _prev: PhotoState,
+  formData: FormData,
+): Promise<PhotoState> {
+  const viewer = await requirePermission("hr.employee.update");
+
+  const [employee] = await db
+    .select({ id: employees.id, photoFileId: employees.photoFileId, code: employees.employeeCode })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.orgId, viewer.orgId)))
+    .limit(1);
+  if (!employee) return { ok: false, message: "That employee no longer exists." };
+
+  const upload = formData.get("photo");
+  if (!(upload instanceof File)) return { ok: false, message: "Choose an image to upload." };
+
+  const stored = await putFile({
+    orgId: viewer.orgId,
+    uploadedBy: viewer.userId,
+    file: upload,
+    maxBytes: PHOTO_MAX_BYTES,
+    // A photograph is an image. A PDF passport scan is a document, and belongs
+    // on the documents tab where it gets an expiry date and a verification.
+    allow: ["image/jpeg", "image/png", "image/webp"],
+  });
+
+  if (!stored.ok) return { ok: false, message: stored.error };
+
+  await db
+    .update(employees)
+    .set({ photoFileId: stored.file.id, updatedAt: new Date() })
+    .where(eq(employees.id, employeeId));
+
+  // Only after the new one is committed, and only if nothing else holds it.
+  if (employee.photoFileId && employee.photoFileId !== stored.file.id) {
+    await dropIfUnreferenced(employee.photoFileId);
+  }
+
+  await db.insert(auditLog).values({
+    orgId: viewer.orgId,
+    actorUserId: viewer.userId,
+    actorLabel: viewer.name,
+    action: "update",
+    entityType: "employee",
+    entityId: employeeId,
+    summary: `Updated the photograph for ${employee.code}`,
+  });
+
+  revalidatePath(`/hr/employees/${employeeId}`);
+  revalidatePath("/hr/employees");
+  return { ok: true, message: "Photograph updated." };
+}
+
+export async function removeEmployeePhoto(employeeId: string): Promise<PhotoState> {
+  const viewer = await requirePermission("hr.employee.update");
+
+  const [employee] = await db
+    .select({ id: employees.id, photoFileId: employees.photoFileId, code: employees.employeeCode })
+    .from(employees)
+    .where(and(eq(employees.id, employeeId), eq(employees.orgId, viewer.orgId)))
+    .limit(1);
+  if (!employee) return { ok: false, message: "That employee no longer exists." };
+
+  await db
+    .update(employees)
+    .set({ photoFileId: null, photoUrl: null, updatedAt: new Date() })
+    .where(eq(employees.id, employeeId));
+
+  await dropIfUnreferenced(employee.photoFileId);
+
+  await db.insert(auditLog).values({
+    orgId: viewer.orgId,
+    actorUserId: viewer.userId,
+    actorLabel: viewer.name,
+    action: "update",
+    entityType: "employee",
+    entityId: employeeId,
+    summary: `Removed the photograph for ${employee.code}`,
+  });
+
+  revalidatePath(`/hr/employees/${employeeId}`);
+  revalidatePath("/hr/employees");
+  return { ok: true, message: "Photograph removed." };
 }

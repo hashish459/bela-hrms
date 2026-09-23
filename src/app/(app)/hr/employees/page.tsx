@@ -19,6 +19,7 @@ import {
   Tr,
 } from "@/components/ui";
 import { OffsetPagination } from "@/components/pagination";
+import { Avatar } from "@/components/avatar";
 import { offsetPage, PAGE_SIZE } from "@/lib/pagination";
 import { EmployeeFilters } from "./filters";
 
@@ -76,6 +77,8 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
         firstName: employees.firstName,
         lastName: employees.lastName,
         nameNepali: employees.fullNameNepali,
+        photoFileId: employees.photoFileId,
+        photoUrl: employees.photoUrl,
         status: employees.status,
         dateOfJoin: employees.dateOfJoin,
         basicSalary: employees.basicSalary,
@@ -150,13 +153,27 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
                   <Td>
                     <Link
                       href={`/hr/employees/${e.id}`}
-                      className="font-medium text-ink hover:text-accent"
+                      className="flex items-center gap-2 font-medium text-ink hover:text-accent"
                     >
-                      {e.firstName} {e.lastName}
+                      <Avatar
+                        photoId={e.photoFileId}
+                        photoUrl={e.photoUrl}
+                        firstName={e.firstName}
+                        lastName={e.lastName}
+                        seed={e.id}
+                        size="sm"
+                      />
+                      <span className="min-w-0">
+                        <span className="block truncate">
+                          {e.firstName} {e.lastName}
+                        </span>
+                        {e.nameNepali ? (
+                          <span className="block truncate text-xs font-normal text-ink-faint">
+                            {e.nameNepali}
+                          </span>
+                        ) : null}
+                      </span>
                     </Link>
-                    {e.nameNepali ? (
-                      <div className="text-xs text-ink-faint">{e.nameNepali}</div>
-                    ) : null}
                   </Td>
                   <Td className="text-ink-soft">{e.designation ?? "—"}</Td>
                   <Td className="text-ink-soft">{e.department ?? "—"}</Td>

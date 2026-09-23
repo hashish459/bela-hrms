@@ -65,7 +65,11 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
 
       {/* ------------------------------------------------------------ identity */}
       <Card className="mb-4 flex flex-wrap items-center gap-4 p-4">
-        <Avatar name={fullName} photoUrl={e.photoUrl} size={56} />
+        <Avatar
+          name={fullName}
+          photoUrl={e.photoFileId ? `/api/files/${e.photoFileId}` : e.photoUrl}
+          size={56}
+        />
         <div className="min-w-0 flex-1">
           <p className="text-base font-semibold text-ink">{fullName}</p>
           {e.fullNameNepali ? (
@@ -372,9 +376,16 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                         {isExpired ? "expired" : "expires"} {gregorian(d.expiresOn)}
                       </Badge>
                     ) : null}
-                    {d.fileUrl ? (
+                    {d.status === "rejected" ? (
+                      <Badge tone="danger" className="max-w-52 truncate">
+                        {d.reviewNote ? `rejected — ${d.reviewNote}` : "rejected"}
+                      </Badge>
+                    ) : d.status === "verified" ? (
+                      <Badge tone="ok">verified</Badge>
+                    ) : null}
+                    {d.fileId ?? d.fileUrl ? (
                       <a
-                        href={d.fileUrl}
+                        href={d.fileId ? `/api/files/${d.fileId}` : (d.fileUrl as string)}
                         target="_blank"
                         rel="noreferrer"
                         className="shrink-0 rounded border border-line px-2 py-1 text-[11px] text-ink-soft hover:bg-sunk hover:text-ink"

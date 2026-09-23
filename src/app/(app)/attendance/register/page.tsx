@@ -1,10 +1,12 @@
 import Link from "next/link";
-import { and, asc, desc, eq, lte, sql } from "drizzle-orm";
+import { and, asc, count, desc, eq, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { attendanceDays, shifts } from "@/db/schema/attendance";
 import { requirePermission } from "@/lib/session";
+import { offsetPage, PAGE_SIZE } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import {
   ATTENDANCE_STATUS_LABEL,
   formatDuration,
@@ -50,48 +52,112 @@ export default async function RegisterPage({ searchParams }: PageProps<"/attenda
     date = latest?.date ?? today;
   }
 
-  const [rows, hols, leaves] = await Promise.all([
-    db
-      .select({
-        employeeId: employees.id,
-        code: employees.employeeCode,
-        name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
-        department: departments.name,
-        shiftName: shifts.name,
-        shiftCode: shifts.code,
-        checkIn: attendanceDays.checkIn,
-        checkOut: attendanceDays.checkOut,
-        workedMinutes: attendanceDays.workedMinutes,
-        lateMinutes: attendanceDays.lateMinutes,
-        otMinutes: attendanceDays.otMinutes,
-        status: attendanceDays.status,
-        source: attendanceDays.source,
-        remarks: attendanceDays.remarks,
-      })
-      .from(employees)
-      .leftJoin(
-        attendanceDays,
-        and(eq(attendanceDays.employeeId, employees.id), eq(attendanceDays.date, date)),
-      )
-      .leftJoin(departments, eq(departments.id, employees.departmentId))
-      .leftJoin(shifts, eq(shifts.id, attendanceDays.shiftId))
-      .where(
-        and(
-          eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
-          sql`${employees.dateOfJoin} <= ${date}`,
-        ),
-      )
-      .orderBy(asc(employees.employeeCode)),
+  /*
+   * Paginated by employee, with the tallies aggregated separately.
+   *
+   * The register is one row per employee for a single day. At the production
+   * headcount that was a 1.5 MB document; the queries were fine, the payload
+   * was not.
+   *
+   * The tiles have to keep counting the whole organisation. Deriving them from
+   * the visible page would mean "Absent: 2" on page one and "Absent: 5" on page
+   * two, describing nothing.
+   */
+  const employedFilter = and(
+    eq(employees.orgId, viewer.orgId),
+    sql`${employees.status} = ANY(ARRAY[${sql.join(
+      EMPLOYED_STATUSES.map((s) => sql`${s}`),
+      sql`, `,
+    )}]::employee_status[])`,
+    sql`${employees.dateOfJoin} <= ${date}`,
+  );
+
+  const [{ n: staffTotal }] = await db
+    .select({ n: count() })
+    .from(employees)
+    .where(employedFilter);
+
+  const page = offsetPage({
+    page: Array.isArray(params.page) ? params.page[0] : params.page,
+    total: Number(staffTotal),
+    defaultSize: PAGE_SIZE.compact,
+  });
+
+  const pageStaff = await db
+    .select({ id: employees.id })
+    .from(employees)
+    .where(employedFilter)
+    .orderBy(asc(employees.employeeCode))
+    .limit(page.limit)
+    .offset(page.offset);
+
+  const pageIds = pageStaff.map((e) => e.id);
+
+  const [rows, hols, leaves, recordedTally] = await Promise.all([
+    pageIds.length === 0
+      ? Promise.resolve([])
+      : db
+          .select({
+            employeeId: employees.id,
+            code: employees.employeeCode,
+            name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
+            department: departments.name,
+            shiftName: shifts.name,
+            shiftCode: shifts.code,
+            checkIn: attendanceDays.checkIn,
+            checkOut: attendanceDays.checkOut,
+            workedMinutes: attendanceDays.workedMinutes,
+            lateMinutes: attendanceDays.lateMinutes,
+            otMinutes: attendanceDays.otMinutes,
+            status: attendanceDays.status,
+            source: attendanceDays.source,
+            remarks: attendanceDays.remarks,
+          })
+          .from(employees)
+          .leftJoin(
+            attendanceDays,
+            and(eq(attendanceDays.employeeId, employees.id), eq(attendanceDays.date, date)),
+          )
+          .leftJoin(departments, eq(departments.id, employees.departmentId))
+          .leftJoin(shifts, eq(shifts.id, attendanceDays.shiftId))
+          .where(and(employedFilter, inArray(employees.id, pageIds)))
+          .orderBy(asc(employees.employeeCode)),
+
     holidayMap(viewer.orgId, date, date),
-    leaveMap(viewer.orgId, date, date),
+    leaveMap(viewer.orgId, date, date, pageIds),
+
+    // Recorded statuses across every employed person, not just this page.
+    db
+      .select({ status: attendanceDays.status, n: count() })
+      .from(attendanceDays)
+      .innerJoin(employees, eq(employees.id, attendanceDays.employeeId))
+      .where(and(employedFilter, eq(attendanceDays.date, date)))
+      .groupBy(attendanceDays.status),
   ]);
 
   const weeklyOff = isSaturday(date);
   const holidayName = hols.get(date) ?? null;
+
+  /*
+   * Organisation-wide tallies.
+   *
+   * Recorded statuses come from the aggregate above. Everyone with no row at
+   * all falls back the same way a single row does — a weekly off, a holiday, or
+   * simply not marked — so the fallback is applied once to the remainder rather
+   * than per row.
+   */
+  const recorded = new Map(recordedTally.map((r) => [r.status as string, Number(r.n)]));
+  const recordedCount = [...recorded.values()].reduce((a, b) => a + b, 0);
+  const unrecorded = Math.max(0, Number(staffTotal) - recordedCount);
+
+  const fallbackStatus: AttendanceStatus = weeklyOff
+    ? "weekly_off"
+    : holidayName
+      ? "holiday"
+      : "not_marked";
+
+  const tally = (status: AttendanceStatus) =>
+    (recorded.get(status) ?? 0) + (status === fallbackStatus ? unrecorded : 0);
 
   const resolved = rows.map((r) => {
     const leave = leaves.get(`${r.employeeId}:${date}`);
@@ -101,7 +167,6 @@ export default async function RegisterPage({ searchParams }: PageProps<"/attenda
     return { ...r, status, leaveName: leave?.typeName ?? null };
   });
 
-  const tally = (s: AttendanceStatus) => resolved.filter((r) => r.status === s).length;
   const lateCount = resolved.filter((r) => (r.lateMinutes ?? 0) > 0).length;
 
   return (
@@ -158,7 +223,8 @@ export default async function RegisterPage({ searchParams }: PageProps<"/attenda
             <EmptyState title="Nobody was employed on this date" />
           </Card>
         ) : (
-          <TableShell>
+          <div className="overflow-hidden rounded-md border border-line bg-surface">
+            <TableShell className="rounded-none border-0">
             <thead>
               <tr>
                 <Th>Code</Th>
@@ -222,7 +288,10 @@ export default async function RegisterPage({ searchParams }: PageProps<"/attenda
                 </Tr>
               ))}
             </tbody>
-          </TableShell>
+            </TableShell>
+
+            <OffsetPagination page={page} params={params} label="employees" />
+          </div>
         )}
       </div>
     </>

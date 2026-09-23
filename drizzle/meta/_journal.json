@@ -50,6 +50,20 @@
       "when": 1788887074656,
       "tag": "0006_rainy_gateway",
       "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "7",
+      "when": 1789869204381,
+      "tag": "0007_melted_christian_walker",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "7",
+      "when": 1789885933883,
+      "tag": "0008_tearful_blacklash",
+      "breakpoints": true
     }
   ]
 }
