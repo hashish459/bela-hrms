@@ -1,8 +1,9 @@
 import Link from "next/link";
-import { and, asc, count, eq, ilike, inArray, or, sql, type SQL } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
+import { and, asc, count, eq, sql, type SQL } from "drizzle-orm";
 import { Plus } from "lucide-react";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, liveEmployee, onStrength } from "@/db/schema/hr";
 import { branches, departments, designations } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
 import { adToBs, formatBsKey } from "@/lib/bs";
@@ -38,21 +39,21 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
   // `?page=999` and rendered nothing, which reads as "no employees".
   const pageParam = Array.isArray(params.page) ? params.page[0] : params.page;
 
-  const filters: SQL[] = [eq(employees.orgId, viewer.orgId)];
+  const branch = typeof params.branch === "string" ? params.branch : "";
+  const filters: SQL[] = [eq(employees.orgId, viewer.orgId), liveEmployee()];
 
   if (q) {
-    const like = `%${q}%`;
+    // Exactly the expression `employees_search_trgm_idx` is built on, so the
+    // planner can answer a '%term%' search from the trigram index instead of
+    // reading every row. Wildcards the user typed are escaped, not honoured.
+    const like = `%${q.replace(/[\\%_]/g, (c) => `\\${c}`)}%`;
     filters.push(
-      or(
-        ilike(employees.firstName, like),
-        ilike(employees.lastName, like),
-        ilike(employees.employeeCode, like),
-        ilike(employees.workEmail, like),
-      )!,
+      sql`(coalesce(${employees.firstName}, '') || ' ' || coalesce(${employees.lastName}, '') || ' ' || ${employees.employeeCode} || ' ' || coalesce(${employees.workEmail}, '')) ilike ${like}`,
     );
   }
   if (dept) filters.push(eq(employees.departmentId, dept));
-  if (status === "employed") filters.push(inArray(employees.status, [...EMPLOYED_STATUSES]));
+  if (branch) filters.push(eq(employees.branchId, branch));
+  if (status === "employed") filters.push(onStrength());
   else if (status && status !== "all") {
     filters.push(eq(employees.status, status as (typeof employees.status.enumValues)[number]));
   }
@@ -69,7 +70,7 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
   const pageSize = page.limit;
   const pageOffset = page.offset;
 
-  const [rows, deptOptions] = await Promise.all([
+  const [rows, deptOptions, branchOptions] = await Promise.all([
     db
       .select({
         id: employees.id,
@@ -100,8 +101,14 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
     db
       .select({ id: departments.id, name: departments.name })
       .from(departments)
-      .where(eq(departments.orgId, viewer.orgId))
+      .where(and(eq(departments.orgId, viewer.orgId), notDeleted(departments)))
       .orderBy(asc(departments.name)),
+
+    db
+      .select({ id: branches.id, name: branches.name })
+      .from(branches)
+      .where(and(eq(branches.orgId, viewer.orgId), notDeleted(branches)))
+      .orderBy(asc(branches.name)),
   ]);
 
   const showSalary = can(viewer, "hr.employee.viewSalary");
@@ -121,7 +128,13 @@ export default async function EmployeesPage({ searchParams }: PageProps<"/hr/emp
         }
       />
 
-      <EmployeeFilters departments={deptOptions} />
+      {params.binned ? (
+        <p className="mb-3 rounded bg-ok-soft px-3 py-2 text-xs text-ok" role="status">
+          The record was moved to the recycle bin. An administrator can restore it from Administration › Recycle Bin.
+        </p>
+      ) : null}
+
+      <EmployeeFilters departments={deptOptions} branches={branchOptions} />
 
       <div className="mt-4">
         {rows.length === 0 ? (

@@ -38,6 +38,13 @@ export type NavItem = {
   section?: string;
   /** Shown on the placeholder page, and as the sidebar tooltip. */
   description?: string;
+  /**
+   * Only meaningful to somebody who *is* an employee — their own leave, their
+   * own attendance, their own desk. Hidden from a login with no employee
+   * record (an administrator, an integration account), whatever its
+   * permissions, because every one of these screens would open onto nobody.
+   */
+  selfService?: boolean;
 };
 
 export type ModuleDefinition = {
@@ -62,6 +69,17 @@ const ready = (
   description?: string,
 ): NavItem => ({ id, label, href, icon, permission, status: "ready", section, description });
 
+/** A ready item that belongs to the person's own record. */
+const mine = (
+  id: string,
+  label: string,
+  href: string,
+  icon: string,
+  permission: string,
+  section?: string,
+  description?: string,
+): NavItem => ({ ...ready(id, label, href, icon, permission, section, description), selfService: true });
+
 const planned = (
   id: string,
   label: string,
@@ -76,10 +94,10 @@ export const MODULES: ModuleDefinition[] = [
   // ------------------------------------------------------------ self service
   {
     id: "self",
-    label: "My Desk",
+    label: "Self Service",
     icon: "UserRound",
     order: 5,
-    summary: "Everything about you: your record, your leave, your attendance.",
+    summary: "Everything about you: your record, your requests, your leave and attendance — for employees, not for administrator logins.",
     permissions: [
       { key: "self.desk.view", label: "Use the employee desk" },
       { key: "self.profile.view", label: "View own profile and documents" },
@@ -87,15 +105,15 @@ export const MODULES: ModuleDefinition[] = [
       { key: "self.notice.read", label: "Read notices" },
     ],
     nav: [
-      ready("self.desk", "My Desk", "/me", "LayoutDashboard", "self.desk.view", "Me"),
-      ready("self.profile", "My Profile", "/me/profile", "IdCard", "self.profile.view", "Me",
-        "Your record, service history, family, qualifications and documents."),
-      ready("self.calendar", "My Calendar", "/me/calendar", "CalendarRange", "self.desk.view", "Me",
+      mine("self.desk", "My Desk", "/me", "LayoutDashboard", "self.desk.view", "Me"),
+      mine("self.profile", "My Profile", "/me/profile", "IdCard", "self.profile.view", "Me",
+        "Your record, service history, family, qualifications and documents — and requests to correct them."),
+      mine("self.calendar", "My Calendar", "/me/calendar", "CalendarRange", "self.desk.view", "Me",
         "Your Bikram Sambat month, with a request one click from any day."),
-      ready("self.notifications", "Notifications", "/me/notifications", "Bell", "self.desk.view", "Me",
+      mine("self.notifications", "Notifications", "/me/notifications", "Bell", "self.desk.view", "Me",
         "Everything waiting on you and every decision on your own requests, with your delivery preferences."),
-      ready("self.notices", "Notices", "/me/notices", "Megaphone", "self.notice.read", "Workplace"),
-      ready("self.directory", "Staff Directory", "/me/directory", "Contact", "self.directory.view", "Workplace"),
+      mine("self.notices", "Notices", "/me/notices", "Megaphone", "self.notice.read", "Workplace"),
+      mine("self.directory", "Staff Directory", "/me/directory", "Contact", "self.directory.view", "Workplace"),
     ],
   },
 
@@ -125,10 +143,12 @@ export const MODULES: ModuleDefinition[] = [
       // update would hide the queue from the people who chase it.
       ready("hr.confirmation", "Confirmations", "/hr/confirmations", "BadgeCheck", "hr.employee.view", "Lifecycle",
         "Probation reviews falling due, and the confirmation decision that moves someone to permanent."),
-      planned("hr.transfers", "Transfers & Promotions", "/hr/transfers", "ArrowRightLeft", "hr.employee.update", "Lifecycle",
+      ready("hr.transfers", "Transfers & Promotions", "/hr/transfers", "ArrowRightLeft", "hr.employee.view", "Lifecycle",
         "Dated placement changes written to employee_assignments, so payroll can answer what was true on a date."),
-      planned("hr.separation", "Separations", "/hr/separations", "LogOut", "hr.employee.separate", "Lifecycle",
+      ready("hr.separation", "Separations", "/hr/separations", "LogOut", "hr.employee.separate", "Lifecycle",
         "Resignation, termination and retirement, with the clearance checklist and final settlement handoff."),
+      ready("hr.profile-requests", "Profile Requests", "/hr/profile-requests", "UserPen", "hr.employee.update", "Records",
+        "Corrections employees ask for from their own profile — contact, bank, family, qualifications — to apply or refuse."),
       planned("hr.recruitment", "Recruitment", "/hr/recruitment", "UserPlus", "hr.recruitment.manage", "Hiring",
         "Vacancies, applicants, shortlisting and interview scheduling through to an offer."),
     ],
@@ -152,10 +172,10 @@ export const MODULES: ModuleDefinition[] = [
       { key: "attendance.device.manage", label: "Manage attendance devices" },
     ],
     nav: [
-      ready("attendance.my", "My Attendance", "/attendance/my", "CalendarClock", "attendance.record.viewOwn", "Daily"),
+      mine("attendance.my", "My Attendance", "/attendance/my", "CalendarClock", "attendance.record.viewOwn", "Daily"),
       ready("attendance.register", "Daily Register", "/attendance/register", "ListChecks", "attendance.record.viewAll", "Daily"),
       ready("attendance.monthly", "Monthly Sheet", "/attendance/monthly", "CalendarRange", "attendance.record.viewAll", "Daily"),
-      ready("attendance.requests", "My Requests", "/attendance/requests", "FilePlus2", "attendance.request.create", "Requests"),
+      mine("attendance.requests", "My Requests", "/attendance/requests", "FilePlus2", "attendance.request.create", "Requests"),
       ready("attendance.approvals", "Approvals", "/attendance/approvals", "Stamp", "attendance.request.approve", "Requests"),
       ready("attendance.shifts", "Shift Master", "/attendance/shifts", "Timer", "attendance.shift.manage", "Setup"),
       ready("attendance.roster", "Shift Assignment", "/attendance/roster", "CalendarCog", "attendance.roster.manage", "Setup"),
@@ -184,7 +204,7 @@ export const MODULES: ModuleDefinition[] = [
       { key: "leave.balance.manage", label: "Adjust leave balances" },
     ],
     nav: [
-      ready("leave.my", "My Leave", "/leave/my", "CalendarCheck", "leave.request.viewOwn", "Requests"),
+      mine("leave.my", "My Leave", "/leave/my", "CalendarCheck", "leave.request.viewOwn", "Requests"),
       ready("leave.approvals", "Approvals", "/leave/approvals", "Stamp", "leave.request.approve", "Requests"),
       ready("leave.register", "Leave Register", "/leave/register", "ClipboardList", "leave.request.viewAll", "Records"),
       ready("leave.calendar", "Leave Calendar", "/leave/calendar", "CalendarRange", "leave.request.viewAll", "Records"),
@@ -474,6 +494,7 @@ export const MODULES: ModuleDefinition[] = [
       { key: "admin.audit.view", label: "View the audit trail" },
       { key: "admin.settings.manage", label: "Manage system settings" },
       { key: "admin.notifications.manage", label: "Manage notifications and send announcements" },
+      { key: "admin.recycle.manage", label: "Restore or permanently purge deleted records" },
       { key: "admin.settings.appearance", label: "Change own appearance settings" },
     ],
     nav: [
@@ -486,6 +507,8 @@ export const MODULES: ModuleDefinition[] = [
         "Theme, typeface, text size, density and accent — personal to each person and their browser."),
       ready("admin.notifications", "Notifications", "/admin/notifications", "BellRing", "admin.notifications.manage", "Oversight",
         "Which events notify whom, by which channel and in what words; announcements; and the delivery log."),
+      ready("admin.recycle-bin", "Recycle Bin", "/admin/recycle-bin", "Trash2", "admin.recycle.manage", "Oversight",
+        "Everything deleted across the system — logins, employee records, masters, file entries — to restore or purge."),
     ],
   },
 
@@ -538,11 +561,16 @@ export type VisibleModule = ModuleDefinition & { sections: NavSection[] };
  * with no visible items are dropped entirely, so the sidebar never shows an
  * empty heading.
  */
-export function visibleNavigation(granted: ReadonlySet<Permission>): VisibleModule[] {
+export function visibleNavigation(
+  granted: ReadonlySet<Permission>,
+  context: { hasEmployee: boolean } = { hasEmployee: true },
+): VisibleModule[] {
   return MODULES.slice()
     .sort((a, b) => a.order - b.order)
     .map((m) => {
-      const items = m.nav.filter((item) => granted.has(item.permission));
+      const items = m.nav.filter(
+        (item) => granted.has(item.permission) && (context.hasEmployee || !item.selfService),
+      );
 
       // Gather by label rather than by adjacency. A module often declares its
       // built screens first and its planned ones after, which would otherwise

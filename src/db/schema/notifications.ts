@@ -18,6 +18,7 @@
  *
  * Plus `announcement`, the record of a broadcast an administrator sent.
  */
+import { sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -63,6 +64,8 @@ export const notifications = pgTable(
     unique("notification_user_dedupe_key").on(t.userId, t.dedupeKey),
     index("notification_user_created_idx").on(t.userId, t.createdAt),
     index("notification_org_created_idx").on(t.orgId, t.createdAt),
+    // the bell asks "how many unread?" once a minute for every open tab
+    index("notification_user_unread_idx").on(t.userId).where(sql`read_at is null and archived_at is null`),
   ],
 );
 
@@ -128,6 +131,7 @@ export const notificationDeliveries = pgTable(
   (t) => [
     index("notification_delivery_status_idx").on(t.status, t.createdAt),
     index("notification_delivery_org_idx").on(t.orgId, t.createdAt),
+    index("notification_delivery_notification_idx").on(t.notificationId),
   ],
 );
 

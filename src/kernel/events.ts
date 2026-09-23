@@ -38,6 +38,11 @@ export type DomainEventName =
   | "attendance.request.approved"
   | "attendance.request.rejected"
   | "org.structure.changed"
+  | "people.movement.applied"
+  | "people.separation.initiated"
+  | "people.separation.completed"
+  | "people.profile_change.submitted"
+  | "people.profile_change.decided"
   | "calendar.holiday.changed"
   | "period.locked"
   | "period.unlocked";

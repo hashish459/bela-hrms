@@ -116,9 +116,9 @@ export default async function MyDeskPage() {
           },
           {
             href: "/me/profile",
-            icon: "IdCard",
-            label: "My profile",
-            hint: "Record, family, documents",
+            icon: "UserPen",
+            label: "Update my details",
+            hint: "Address, bank, family — HR applies it",
           },
         ]}
       />

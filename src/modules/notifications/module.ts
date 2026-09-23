@@ -89,7 +89,7 @@ async function describe(name: string, p: Payload) {
  * is versioned and stable, so a redeploy does not re-deliver completed work.
  */
 for (const entry of CATALOGUE) {
-  if (!entry.source || entry.source === "org.structure.changed") continue;
+  if (!entry.source || entry.source === "org.structure.changed" || entry.source.startsWith("people.")) continue;
   subscribe({
     id: `notifications.${entry.key}@1`,
     module: "notifications",
@@ -107,6 +107,61 @@ for (const entry of CATALOGUE) {
         actorUserId: d.actorUserId,
         actorLabel: entry.key === "leave.withdrawn" || entry.key.endsWith(".submitted") ? d.context.employee : d.actorLabel,
         dedupeKey: `${entry.key}:${d.id}${level}`,
+      });
+    },
+  });
+}
+
+/*
+ * Employee-record events. The payload carries the words; only the employee's
+ * name is looked up, as everywhere else.
+ */
+const PEOPLE: { key: string; event: DomainEventName; id: (p: Payload) => string | null; context: (p: Payload) => Record<string, string | null> }[] = [
+  {
+    key: "people.movement_applied",
+    event: "people.movement.applied",
+    id: (p) => str(p.movementId),
+    context: (p) => ({ kind: str(p.kind), date: str(p.effectiveDateBs) ?? str(p.effectiveDate), reference: str(p.reference) }),
+  },
+  {
+    key: "people.separation_initiated",
+    event: "people.separation.initiated",
+    id: (p) => str(p.separationId),
+    context: (p) => ({ kind: str(p.kind), date: str(p.lastWorkingDateBs) ?? str(p.lastWorkingDate), reference: str(p.reference) }),
+  },
+  {
+    key: "people.profile_change_submitted",
+    event: "people.profile_change.submitted",
+    id: (p) => str(p.requestId),
+    context: (p) => ({ section: str(p.section) }),
+  },
+  {
+    key: "people.profile_change_decided",
+    event: "people.profile_change.decided",
+    id: (p) => str(p.requestId),
+    context: (p) => ({ section: str(p.section), outcome: str(p.outcome), comment: str(p.comment) }),
+  },
+];
+
+for (const def of PEOPLE) {
+  subscribe({
+    id: `notifications.${def.key}@1`,
+    module: "notifications",
+    event: def.event,
+    async run(payload, orgId) {
+      const id = def.id(payload);
+      if (!id) return;
+      const subject = str(payload.employeeId);
+      const names = await employeeNames([subject]);
+      const actorUserId = str(payload.decidedByUserId);
+      const actor = await userName(actorUserId);
+      const employee = names.get(subject ?? "") ?? "An employee";
+      await notify(orgId, def.key, {
+        context: { employee, actor, ...def.context(payload) },
+        subjectEmployeeId: subject,
+        actorUserId,
+        actorLabel: def.key === "people.profile_change_submitted" ? employee : actor,
+        dedupeKey: `${def.key}:${id}`,
       });
     },
   });

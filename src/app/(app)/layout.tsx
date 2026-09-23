@@ -77,7 +77,9 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   // somebody clicks it.
   await loadModuleStates(viewer.orgId);
 
-  const modules = visibleNavigation(viewer.permissions);
+  // A login with no employee record has no desk, no leave and no attendance of
+  // its own: those items go, rather than opening onto a 403.
+  const modules = visibleNavigation(viewer.permissions, { hasEmployee: !!viewer.employeeId });
   const [counts, notifications] = await Promise.all([approvalCounts(viewer), bellSummaryFor(viewer.userId)]);
 
   // Reminders have no event to trigger them. Throttled to once per half hour

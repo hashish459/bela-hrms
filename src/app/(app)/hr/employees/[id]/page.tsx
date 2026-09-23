@@ -1,9 +1,11 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import {
   ArrowLeft,
+  ArrowRightLeft,
   BadgeCheck,
+  LogOut,
   Building2,
   CalendarClock,
   Mail,
@@ -12,7 +14,7 @@ import {
   ShieldAlert,
 } from "lucide-react";
 import { db } from "@/db/client";
-import { employees, probationReviews } from "@/db/schema/hr";
+import { employeeAssignments, employeeSeparations, employees, probationReviews } from "@/db/schema/hr";
 import { branches, departments, designations, employmentTypes, grades } from "@/db/schema/org";
 import { leaveBalances, leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { employeeDocuments } from "@/db/schema/selfservice";
@@ -41,6 +43,12 @@ import {
 } from "@/components/ui";
 import { Avatar } from "@/components/avatar";
 import { DocumentTable, type DocumentRow } from "../../documents/document-table";
+import { DeskTabs } from "../../../me/parts";
+import { rowsFor } from "@/modules/people/records";
+import { listMovements, MOVEMENT_LABEL } from "@/modules/people/movements";
+import { SEPARATION_LABEL } from "@/modules/people/separations";
+import { DeleteRecord } from "./delete-record";
+import { RecordRows, type RecordRow } from "./record-rows";
 import { PhotoUpload } from "./photo-upload";
 
 export const metadata = { title: "Employee" };
@@ -84,9 +92,15 @@ function Chip({ icon: Icon, children }: { icon: typeof Mail; children: React.Rea
   );
 }
 
-export default async function EmployeeDetailPage({ params }: PageProps<"/hr/employees/[id]">) {
+const TABS = ["overview", "personal", "family", "education", "experience", "service", "documents", "leave"] as const;
+type Tab = (typeof TABS)[number];
+
+export default async function EmployeeDetailPage({ params, searchParams }: PageProps<"/hr/employees/[id]">) {
   const viewer = await requirePermission("hr.employee.view");
   const { id } = await params;
+  const query = await searchParams;
+  const rawTab = typeof query.tab === "string" ? query.tab : "overview";
+  const tab: Tab = (TABS as readonly string[]).includes(rawTab) ? (rawTab as Tab) : "overview";
   const today = todayInNepal();
 
   const [row] = await db
@@ -109,7 +123,7 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
     .leftJoin(employmentTypes, eq(employmentTypes.id, employees.employmentTypeId))
     .leftJoin(grades, eq(grades.id, employees.gradeId))
     .leftJoin(sql`employees sup`, sql`sup.id = ${employees.supervisorId}`)
-    .where(and(eq(employees.id, id), eq(employees.orgId, viewer.orgId)))
+    .where(and(eq(employees.id, id), eq(employees.orgId, viewer.orgId), isNull(employees.deletedAt)))
     .limit(1);
 
   if (!row) notFound();
@@ -117,7 +131,7 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
 
   const canManageDocuments = can(viewer, "hr.document.manage");
 
-  const [balances, requests, reports, documents, reviews] = await Promise.all([
+  const [balances, requests, reports, documents, reviews, rows, history, movements, [openSeparation]] = await Promise.all([
     db
       .select({
         id: leaveBalances.id,
@@ -202,10 +216,50 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
       .where(eq(probationReviews.employeeId, id))
       .orderBy(desc(probationReviews.decidedAt))
       .limit(5),
+
+    rowsFor(viewer.orgId, id),
+
+    db
+      .select({
+        id: employeeAssignments.id,
+        effectiveFrom: employeeAssignments.effectiveFrom,
+        effectiveTo: employeeAssignments.effectiveTo,
+        reason: employeeAssignments.reason,
+        isCurrent: employeeAssignments.isCurrent,
+        branch: branches.name,
+        department: departments.name,
+        designation: designations.name,
+        grade: grades.name,
+      })
+      .from(employeeAssignments)
+      .leftJoin(branches, eq(branches.id, employeeAssignments.branchId))
+      .leftJoin(departments, eq(departments.id, employeeAssignments.departmentId))
+      .leftJoin(designations, eq(designations.id, employeeAssignments.designationId))
+      .leftJoin(grades, eq(grades.id, employeeAssignments.gradeId))
+      .where(eq(employeeAssignments.employeeId, id))
+      .orderBy(desc(employeeAssignments.effectiveFrom)),
+
+    listMovements(viewer.orgId, { employeeId: id, limit: 50 }),
+
+    db
+      .select({
+        id: employeeSeparations.id,
+        reference: employeeSeparations.reference,
+        kind: employeeSeparations.kind,
+        lastWorkingDate: employeeSeparations.lastWorkingDate,
+      })
+      .from(employeeSeparations)
+      .where(and(eq(employeeSeparations.employeeId, id), eq(employeeSeparations.status, "in_progress")))
+      .limit(1),
   ]);
 
   const showSalary = can(viewer, "hr.employee.viewSalary");
   const canEdit = can(viewer, "hr.employee.update");
+  const canSeparate = can(viewer, "hr.employee.separate");
+  const nominees = rows.family.filter((f) => f.isNominee);
+  const nomineeTotal = nominees.length ? nominees.reduce((sum, f) => sum + (f.nomineeSharePercent ?? 0), 0) : null;
+  const toRows = (list: Record<string, unknown>[]): RecordRow[] =>
+    list.map((r) => ({ id: String(r.id), values: r as RecordRow["values"] }));
 
   const documentRows: DocumentRow[] = documents.map((d) => {
     const state = expiryState(d.expiresOn, today);
@@ -315,6 +369,18 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
                 Review probation
               </ButtonLink>
             ) : null}
+            {canEdit && !e.separationDate ? (
+              <ButtonLink href={`/hr/transfers?employee=${e.id}`} variant="secondary">
+                <ArrowRightLeft className="size-4" />
+                Transfer / promote
+              </ButtonLink>
+            ) : null}
+            {canSeparate && !openSeparation && !e.separationDate ? (
+              <ButtonLink href={`/hr/separations?employee=${e.id}`} variant="secondary">
+                <LogOut className="size-4" />
+                Separation
+              </ButtonLink>
+            ) : null}
             {canEdit ? (
               <ButtonLink href={`/hr/employees/${e.id}/edit`} variant="secondary">
                 Edit
@@ -323,6 +389,19 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
           </div>
         </div>
       </Card>
+
+      {openSeparation ? (
+        <Link
+          href={`/hr/separations/${openSeparation.id}`}
+          className="mt-4 flex items-center gap-3 rounded-md border border-danger/40 bg-danger-soft/50 p-3 hover:bg-danger-soft"
+        >
+          <LogOut className="size-4 shrink-0 text-danger" />
+          <p className="text-sm text-ink">
+            <b>{SEPARATION_LABEL[openSeparation.kind]}</b> in progress · last working day {bs(openSeparation.lastWorkingDate)} ·{" "}
+            <span className="font-mono text-xs">{openSeparation.reference}</span>
+          </p>
+        </Link>
+      ) : null}
 
       {/* -------------------------------------------------------- what is due */}
       {onProbation || documentAlerts.length > 0 ? (
@@ -374,7 +453,24 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
         </div>
       ) : null}
 
-      <div className="mt-4 grid gap-4 lg:grid-cols-[3fr_2fr]">
+      <div className="mt-4">
+        <DeskTabs
+          active={tab === "overview" ? `/hr/employees/${e.id}` : `/hr/employees/${e.id}?tab=${tab}`}
+          items={[
+            { href: `/hr/employees/${e.id}`, label: "Overview" },
+            { href: `/hr/employees/${e.id}?tab=personal`, label: "Personal" },
+            { href: `/hr/employees/${e.id}?tab=family`, label: "Family", count: rows.family.length },
+            { href: `/hr/employees/${e.id}?tab=education`, label: "Education & skills", count: rows.qualifications.length },
+            { href: `/hr/employees/${e.id}?tab=experience`, label: "Experience", count: rows.experience.length },
+            { href: `/hr/employees/${e.id}?tab=service`, label: "Service history", count: history.length },
+            ...(canManageDocuments ? [{ href: `/hr/employees/${e.id}?tab=documents`, label: "Documents", count: documents.length }] : []),
+            { href: `/hr/employees/${e.id}?tab=leave`, label: "Leave" },
+          ]}
+        />
+      </div>
+
+      {tab === "overview" ? (
+      <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
         <div className="flex flex-col gap-4">
           <Card>
             <CardHeader title="Employment" />
@@ -414,83 +510,8 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
             </dl>
           </Card>
 
-          <Card>
-            <CardHeader title="Personal & statutory" />
-            <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
-              <Detail label="Gender" value={<span className="capitalize">{e.gender}</span>} />
-              <Detail
-                label="Marital status"
-                value={
-                  e.maritalStatus ? <span className="capitalize">{e.maritalStatus}</span> : null
-                }
-              />
-              <Detail label="Date of birth" value={bs(e.dateOfBirth)} />
-              <Detail label="Work email" value={e.workEmail} />
-              <Detail label="Mobile" value={e.mobile} />
-              <Detail label="District" value={e.district} />
-              <Detail label="PAN" value={<span className="font-mono text-xs">{e.panNumber}</span>} />
-              <Detail label="SSF" value={<span className="font-mono text-xs">{e.ssfNumber}</span>} />
-              <Detail
-                label="Provident fund"
-                value={<span className="font-mono text-xs">{e.pfNumber}</span>}
-              />
-              {showSalary ? <Detail label="Bank" value={e.bankName} /> : null}
-              {showSalary ? (
-                <Detail
-                  label="Account"
-                  value={<span className="font-mono text-xs">{e.bankAccountNumber}</span>}
-                />
-              ) : null}
-            </dl>
-          </Card>
 
-          {canManageDocuments ? (
-            <Card>
-              <DocumentTable
-                rows={documentRows}
-                fixedEmployeeId={id}
-                canManage
-                showEmployee={false}
-                title="Documents"
-                description="Contracts, certificates and identity papers held on this record."
-                emptyHint="Nothing filed yet. Contracts and identity documents belong here so their expiry is tracked."
-              />
-            </Card>
-          ) : null}
-
-          <Card>
-            <CardHeader title="Recent leave" description="Most recent eight requests" />
-            {requests.length === 0 ? (
-              <EmptyState title="No leave requests yet" />
-            ) : (
-              <TableShell>
-                <thead>
-                  <tr>
-                    <Th>Reference</Th>
-                    <Th>Type</Th>
-                    <Th>From (BS)</Th>
-                    <Th>To (BS)</Th>
-                    <Th className="text-right">Days</Th>
-                    <Th>Status</Th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {requests.map((r) => (
-                    <Tr key={r.id}>
-                      <Td className="font-mono text-xs text-ink-soft">{r.reference}</Td>
-                      <Td>{r.type}</Td>
-                      <Td className="tabular text-ink-soft">{r.fromDateBs}</Td>
-                      <Td className="tabular text-ink-soft">{r.toDateBs}</Td>
-                      <Td className="tabular text-right">{formatDays(r.totalDays)}</Td>
-                      <Td>
-                        <StatusBadge value={r.status} />
-                      </Td>
-                    </Tr>
-                  ))}
-                </tbody>
-              </TableShell>
-            )}
-          </Card>
+          {canSeparate ? <DeleteRecord employeeId={e.id} code={e.employeeCode} name={`${e.firstName} ${e.lastName}`} /> : null}
         </div>
 
         <div className="flex flex-col gap-4">
@@ -628,6 +649,317 @@ export default async function EmployeeDetailPage({ params }: PageProps<"/hr/empl
           </Card>
         </div>
       </div>
+      ) : null}
+
+      {tab === "personal" ? (
+        <div className="grid gap-4 lg:grid-cols-2">
+          <Card>
+            <CardHeader title="Personal & statutory" action={canEdit ? <Link href={`/hr/employees/${e.id}/edit`} className="text-xs text-accent hover:underline">Edit</Link> : undefined} />
+            <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
+              <Detail label="Gender" value={<span className="capitalize">{e.gender}</span>} />
+              <Detail
+                label="Marital status"
+                value={
+                  e.maritalStatus ? <span className="capitalize">{e.maritalStatus}</span> : null
+                }
+              />
+              <Detail label="Date of birth" value={bs(e.dateOfBirth)} />
+              <Detail label="Work email" value={e.workEmail} />
+              <Detail label="Mobile" value={e.mobile} />
+              <Detail label="District" value={e.district} />
+              <Detail label="PAN" value={<span className="font-mono text-xs">{e.panNumber}</span>} />
+              <Detail label="SSF" value={<span className="font-mono text-xs">{e.ssfNumber}</span>} />
+              <Detail
+                label="Provident fund"
+                value={<span className="font-mono text-xs">{e.pfNumber}</span>}
+              />
+              {showSalary ? <Detail label="Bank" value={e.bankName} /> : null}
+              {showSalary ? (
+                <Detail
+                  label="Account"
+                  value={<span className="font-mono text-xs">{e.bankAccountNumber}</span>}
+                />
+              ) : null}
+            </dl>
+          </Card>
+
+
+          <Card>
+            <CardHeader title="Contact & emergency" />
+            <dl className="grid grid-cols-2 gap-4 p-4">
+              <Detail label="Personal email" value={e.personalEmail} />
+              <Detail label="Mobile" value={e.mobile} />
+              <Detail label="Current address" value={e.temporaryAddress} />
+              <Detail label="Permanent address" value={e.permanentAddress} />
+              <Detail label="Emergency contact" value={e.emergencyContactName} />
+              <Detail label="Relationship" value={e.emergencyContactRelation} />
+              <Detail label="Emergency phone" value={e.emergencyContactPhone} />
+            </dl>
+          </Card>
+          <Card>
+            <CardHeader title="Other details" />
+            <dl className="grid grid-cols-2 gap-4 p-4 sm:grid-cols-3">
+              <Detail label="Blood group" value={e.bloodGroup} />
+              <Detail label="Nationality" value={e.nationality} />
+              <Detail label="Religion" value={e.religion} />
+              <Detail label="Citizenship no." value={<span className="font-mono text-xs">{e.citizenshipNumber}</span>} />
+              <Detail label="Passport no." value={<span className="font-mono text-xs">{e.passportNumber}</span>} />
+              <Detail label="CIT" value={<span className="font-mono text-xs">{e.citNumber}</span>} />
+              <Detail label="Notice period" value={e.noticePeriodDays ? `${e.noticePeriodDays} days` : null} />
+              {showSalary ? <Detail label="Bank branch" value={e.bankBranch} /> : null}
+            </dl>
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === "family" ? (
+        <Card>
+          <RecordRows
+            section="family"
+            employeeId={e.id}
+            rows={toRows(rows.family)}
+            canEdit={canEdit}
+            columns={["fullName", "relationship", "dateOfBirth", "contactNumber", "isNominee", "nomineeSharePercent", "isDependant"]}
+            title="Family and dependants"
+            description={
+              nomineeTotal !== null && nomineeTotal !== 100
+                ? `Nominee shares add up to ${nomineeTotal}% — they should total 100% before a benefit can be paid.`
+                : "Nominees receive gratuity, provident fund and death benefit; shares should add up to 100%."
+            }
+          />
+        </Card>
+      ) : null}
+
+      {tab === "education" ? (
+        <Card>
+          <RecordRows
+            section="qualification"
+            employeeId={e.id}
+            rows={toRows(rows.qualifications)}
+            canEdit={canEdit}
+            columns={["title", "kind", "institution", "result", "completedYear", "expiresOn"]}
+            title="Education, certifications and skills"
+          />
+        </Card>
+      ) : null}
+
+      {tab === "experience" ? (
+        <Card>
+          <RecordRows
+            section="experience"
+            employeeId={e.id}
+            rows={toRows(rows.experience)}
+            canEdit={canEdit}
+            columns={["employer", "designation", "fromDate", "toDate", "reasonForLeaving"]}
+            title="Previous employment"
+            description="Service before joining — for seniority, references and experience letters."
+          />
+        </Card>
+      ) : null}
+
+      {tab === "service" ? (
+        <div className="flex flex-col gap-4">
+          <Card>
+            <CardHeader
+              title="Transfers, promotions and revisions"
+              description="Every recorded movement, including those scheduled for a future date."
+              action={
+                canEdit && !e.separationDate ? (
+                  <Link href={`/hr/transfers?employee=${e.id}`} className="text-xs text-accent hover:underline">
+                    Record a movement
+                  </Link>
+                ) : undefined
+              }
+            />
+            {movements.length === 0 ? (
+              <EmptyState title="No movements recorded" />
+            ) : (
+              <TableShell className="rounded-none border-0">
+                <thead>
+                  <tr>
+                    <Th>Reference</Th>
+                    <Th>Kind</Th>
+                    <Th>Effective (BS)</Th>
+                    <Th>Change</Th>
+                    <Th>Status</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {movements.map((m) => (
+                    <Tr key={m.id}>
+                      <Td className="font-mono text-xs text-ink-soft">{m.reference}</Td>
+                      <Td>{MOVEMENT_LABEL[m.kind]}</Td>
+                      <Td className="tabular text-ink-soft">{bs(m.effectiveDate)}</Td>
+                      <Td className="text-xs text-ink-soft">
+                        {[
+                          m.toBranch ? `${m.fromBranch ?? "—"} → ${m.toBranch}` : null,
+                          m.toDepartment ? `${m.fromDepartment ?? "—"} → ${m.toDepartment}` : null,
+                          m.toDesignation ? `${m.fromDesignation ?? "—"} → ${m.toDesignation}` : null,
+                          m.toGrade ? `${m.fromGrade ?? "—"} → ${m.toGrade}` : null,
+                          m.toSupervisor ? `reports to ${m.toSupervisor}` : null,
+                          showSalary && m.toBasicSalary ? `${formatNpr(m.fromBasicSalary)} → ${formatNpr(m.toBasicSalary)}` : null,
+                        ]
+                          .filter(Boolean)
+                          .join(" · ") || "—"}
+                      </Td>
+                      <Td>
+                        <Badge tone={m.status === "applied" ? "ok" : m.status === "scheduled" ? "info" : "neutral"}>{m.status}</Badge>
+                      </Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </TableShell>
+            )}
+          </Card>
+
+          <Card>
+            <CardHeader title="Placement history" description="What was true, and from when — what payroll reads for any past date." />
+            {history.length === 0 ? (
+              <EmptyState title="No placement history yet" hint="Recording a transfer or promotion starts it." />
+            ) : (
+              <TableShell className="rounded-none border-0">
+                <thead>
+                  <tr>
+                    <Th>From (BS)</Th>
+                    <Th>To (BS)</Th>
+                    <Th>Designation</Th>
+                    <Th>Department</Th>
+                    <Th>Branch</Th>
+                    <Th>Grade</Th>
+                    <Th>Reason</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {history.map((h) => (
+                    <Tr key={h.id}>
+                      <Td className="tabular">{bs(h.effectiveFrom)}</Td>
+                      <Td className="tabular">{h.effectiveTo ? bs(h.effectiveTo) : <Badge tone="ok">current</Badge>}</Td>
+                      <Td className="text-ink">{h.designation ?? "—"}</Td>
+                      <Td className="text-ink-soft">{h.department ?? "—"}</Td>
+                      <Td className="text-ink-soft">{h.branch ?? "—"}</Td>
+                      <Td className="text-ink-soft">{h.grade ?? "—"}</Td>
+                      <Td className="text-xs text-ink-faint">{h.reason ?? "—"}</Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </TableShell>
+            )}
+          </Card>
+        </div>
+      ) : null}
+
+      {tab === "documents" ? (
+        <div>
+          {canManageDocuments ? (
+            <Card>
+              <DocumentTable
+                rows={documentRows}
+                fixedEmployeeId={id}
+                canManage
+                showEmployee={false}
+                title="Documents"
+                description="Contracts, certificates and identity papers held on this record."
+                emptyHint="Nothing filed yet. Contracts and identity documents belong here so their expiry is tracked."
+              />
+            </Card>
+          ) : null}
+
+        </div>
+      ) : null}
+
+      {tab === "leave" ? (
+        <div className="grid gap-4 lg:grid-cols-[3fr_2fr]">
+          <div>
+          <Card>
+            <CardHeader title="Recent leave" description="Most recent eight requests" />
+            {requests.length === 0 ? (
+              <EmptyState title="No leave requests yet" />
+            ) : (
+              <TableShell>
+                <thead>
+                  <tr>
+                    <Th>Reference</Th>
+                    <Th>Type</Th>
+                    <Th>From (BS)</Th>
+                    <Th>To (BS)</Th>
+                    <Th className="text-right">Days</Th>
+                    <Th>Status</Th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {requests.map((r) => (
+                    <Tr key={r.id}>
+                      <Td className="font-mono text-xs text-ink-soft">{r.reference}</Td>
+                      <Td>{r.type}</Td>
+                      <Td className="tabular text-ink-soft">{r.fromDateBs}</Td>
+                      <Td className="tabular text-ink-soft">{r.toDateBs}</Td>
+                      <Td className="tabular text-right">{formatDays(r.totalDays)}</Td>
+                      <Td>
+                        <StatusBadge value={r.status} />
+                      </Td>
+                    </Tr>
+                  ))}
+                </tbody>
+              </TableShell>
+            )}
+          </Card>
+          </div>
+          <div>
+          <Card>
+            <CardHeader
+              title="Leave balances"
+              description={viewer.fiscalYear ? `Fiscal year ${viewer.fiscalYear.code}` : undefined}
+            />
+            {balances.length === 0 ? (
+              <EmptyState title="No balances allocated" />
+            ) : (
+              <ul className="divide-y divide-line-soft">
+                {balances.map((b) => {
+                  const entitled = Number(b.entitled) + Number(b.carried);
+                  const used = Number(b.used);
+                  const pending = Number(b.pending);
+                  const available = entitled - used - pending;
+                  return (
+                    <li key={b.id} className="px-4 py-3">
+                      <div className="flex items-baseline justify-between gap-2">
+                        <span className="flex items-center gap-1.5 text-sm text-ink">
+                          <span
+                            className="size-2 shrink-0 rounded-full"
+                            style={{ background: b.colour }}
+                            aria-hidden
+                          />
+                          {b.type}
+                        </span>
+                        <span className="tabular text-sm font-medium text-ink">
+                          {formatDays(available)}
+                          <span className="text-xs font-normal text-ink-faint">
+                            {" "}
+                            / {formatDays(entitled)}
+                          </span>
+                        </span>
+                      </div>
+                      <div className="mt-1.5">
+                        <MeterBar
+                          used={used + pending}
+                          total={entitled}
+                          tone={available <= 0 ? "danger" : pending > 0 ? "warn" : "accent"}
+                        />
+                      </div>
+                      {pending > 0 ? (
+                        <p className="mt-1 text-[11px] text-warn">
+                          {formatDays(pending)} awaiting approval
+                        </p>
+                      ) : null}
+                    </li>
+                  );
+                })}
+              </ul>
+            )}
+          </Card>
+
+          </div>
+        </div>
+      ) : null}
     </>
   );
 }

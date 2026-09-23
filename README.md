@@ -48,7 +48,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 
 | Module | Status | Screens |
 |---|---|---|
-| **Employees** | 2 of 7 built | Employees, Reporting Lines · *documents, confirmations, transfers, separations, recruitment planned* |
+| **Employees** | 7 of 8 built | Employees (tabbed personnel file — personal, family & nominees, education, previous employment, service history, documents, leave), Reporting Lines, Documents, Confirmations, Transfers & Promotions (dated, scheduled or immediate), Separations (notice, no-dues checklist, exit interview, settlement), Profile Requests · *recruitment planned* |
 | **Attendance** | 9 of 10 built | My Attendance, Daily Register, Monthly Sheet, My Requests, Approvals, Shift Master, Shift Assignment, Devices, Reports (overview, muster roll, late & early exit, absenteeism with Bradford factor, overtime, exceptions, departments — CSV export and print) · *overtime claims planned* |
 | **Leave** | 8 of 10 built | My Leave, Approvals, Register, Calendar, Reports (overview, balances with lapse risk, by leave type, leave history, approval turnaround, departments — CSV export and print), Balances, Types, Policy · *encashment, lapse planned* |
 | **Payroll** | planned | Salary heads and structure, monthly run, payslips, TDS, SSF/PF, bank advice |
@@ -60,7 +60,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | **Inventory** | planned | Items, groups, stores, requests, issue and return, stock ledger |
 | **Fixed Assets** | planned | Register, groups, allocation, maintenance, depreciation, disposal |
 | **Organisation** | 14 of 14 built | Company Profile, Branches, Departments & sections, Designations, Grades, Employment Types, Divisions, Business Units, Sub Business Units, Functional Categories, Projects, Locations, Fiscal Years, Holidays — every master editable (add, edit, deactivate, reactivate, delete when unreferenced), audited field by field |
-| **Administration** | 5 of 5 built | Users, Roles, Audit Trail, Appearance, Notifications (rules per event — on/off, in-app and email channels, recipients, thresholds, wording with live preview and test send; announcements to everyone, a branch, department or role; delivery log and email outbox; volume overview) |
+| **Administration** | 7 of 7 built | Users (create, disable, delete), Roles, Audit Trail, Modules, Recycle Bin (restore or purge anything deleted), Appearance, Notifications (rules per event — on/off, in-app and email channels, recipients, thresholds, wording with live preview and test send; announcements to everyone, a branch, department or role; delivery log and email outbox; volume overview) |
 | **Documentation** | 7 of 7 built | Getting Started, User Manual, FAQ, Architecture, Data Model, Workflows, Roadmap |
 
 A planned screen is a real route. It renders what it will do, which permission guards
@@ -462,6 +462,83 @@ document that expired yesterday read as *zero days remaining*, so the reminder w
 have fired. The fix was a separate, honestly named `daysUntil`, not a change to the one the
 leave engine depends on.
 
+**Transfers & promotions.** `employee_assignments` was designed as the answer to "what
+was true on this date" and nothing ever wrote to it. A movement now records the placement
+before and after — branch, department, designation, grade, supervisor, basic salary — with
+an office-order number. Dated today or earlier it is applied in the same transaction (the
+employee row, the current assignment period closed the day before, a new one opened);
+dated later it waits as *scheduled* and is applied when its day comes, by the cron
+endpoint or the next visit to the register. References come from a transaction-scoped
+advisory lock, so two clerks saving at once cannot mint the same `TRF-2083-0004`.
+
+**Separations** are a case, not a status flip: notice date and last working day, a no-dues
+checklist (line manager, IT, admin, finance, HR — lines can be added, and waiving one needs
+a reason), exit interview, rehire eligibility and settlement. Only *completing* the case
+touches the employee — status, separation date, supervisor links released, login disabled
+and every session revoked in one transaction — and it is refused while anything is pending
+or while the person is still serving notice. One open case per person is a partial unique
+index, not a check in code.
+
+**Self service.** Employees never write their own record. From **My Profile** they *request*
+a change — contact, address, emergency contact, personal details, bank account, or adding,
+correcting or removing a family member, qualification or previous job. HR sees before and
+after side by side in **Profile Requests** and applies or refuses; applying claims the
+request, writes the record and publishes the decision in one transaction, so two reviewers
+cannot both apply it. Placement, salary, dates of service and statutory numbers are not
+offered at all. Logins with no employee record — administrators, integration accounts — do
+not see Self Service, My Leave or My Attendance, because every one of those screens would
+open onto nobody.
+
+## Soft delete and the recycle bin
+
+Deleting anywhere is soft: logins, employee records, documents, family, qualification and
+experience rows, branches, departments, designations, grades, employment types and
+structure units get `deleted_at` / `deleted_by`, drop out of every list, picker and report,
+and wait in **Administration › Recycle Bin** to be restored exactly as they were or purged.
+
+- **Uniqueness is among live rows only** — codes are partial unique indexes
+  (`WHERE deleted_at IS NULL`), so a duplicate deleted by mistake does not hold its code
+  hostage. Restoring checks for a clash and says so.
+- **Purge is the owning module's decision.** An employee with leave or attendance history
+  cannot be purged — that history is evidence for other people's decisions. A master that is
+  still referenced cannot be. A purged login cascades to its sessions and roles; the audit
+  trail keeps the actor's name.
+- **Deleting a login stops it at once**: marked deleted and inactive, every session
+  revoked, cached authorisation dropped. Nobody can delete themselves, and a system
+  administrator can only be deleted by another one — never the last.
+- **Deleting an employee is for duplicates.** It is refused while people report to them or
+  a request waits on them, and closes their login in the same transaction. Somebody leaving
+  is a separation, which keeps them on file.
+
+## Performance, caching and database hardening
+
+- **Indexes on the hot paths**: a trigram GIN index for the employee search (`'%term%'` is
+  an index scan, the query uses exactly the indexed expression and escapes user wildcards),
+  partial indexes for the unread-notification count, scheduled movements and open
+  separations, and indexes on `session.user_id`, `account.user_id`, leave date ranges,
+  audit actor and the other foreign keys lists filter by.
+- **Caching** ([`kernel/cache.ts`](src/kernel/cache.ts)) for what every request reads and
+  almost nothing writes: a login's account, grants and role names; the current fiscal year;
+  module switches; notification rules; the employee-form dropdowns. It is in-process with
+  short TTLs and tag invalidation — every write that can change an answer drops its tag
+  before returning — plus *generation fencing* (a load that raced an invalidation is never
+  stored, so "disable login" cannot be undone by a page load in flight) and request
+  coalescing. One app container is the deployment, so the process is the shared state; more
+  containers would swap this file for Redis without touching a caller.
+- **Connection pool** with a 30 s `statement_timeout`, a 60 s
+  `idle_in_transaction_session_timeout` (a crashed request cannot hold row locks all day),
+  a connect timeout and an `application_name` visible in `pg_stat_activity`. Sizes are
+  environment-tunable (`DB_POOL_MAX`, `DB_STATEMENT_TIMEOUT_MS`, `DB_CONNECT_TIMEOUT_MS`).
+- **Housekeeping** on the cron endpoint: expired sessions and verification tokens, and
+  domain events delivered over 90 days ago, deleted in bounded batches.
+- **Security fixes found on the way**: the public `POST /api/auth/sign-up/email` route was
+  open — anybody could mint an auth user — and is now refused (404) while the server-side
+  API that Administration uses keeps working; sign-in and password change are rate limited
+  (5 a minute per client IP) in every environment, not only production; the employee edit
+  form serialised the basic salary into the page for people not allowed to see it, and the
+  save action accepted a salary from anybody — both closed; disabling a login now revokes
+  its sessions instead of waiting for them to refresh.
+
 ---
 
 ## Scale
@@ -594,7 +671,7 @@ Leave and attendance publish domain events; the **notifications** module subscri
 turns each into a catalogue entry ([`catalogue.ts`](src/modules/notifications/catalogue.ts)),
 so a notification fault delays a message and never rolls back the approval behind it.
 Every user gets a header bell (polls every minute and on focus), an inbox at
-**My Desk › Notifications** with per-category in-app/email preferences, and never a
+**Self Service › Notifications** with per-category in-app/email preferences, and never a
 notification about their own action. Administrators tune each rule at
 **Administration › Notifications**. Reminders (approvals waiting, documents expiring,
 probation ending) are swept at most every 30 minutes per organisation and deduplicated.

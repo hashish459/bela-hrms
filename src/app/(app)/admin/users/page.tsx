@@ -1,12 +1,12 @@
 import Link from "next/link";
-import { asc, eq, sql } from "drizzle-orm";
+import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { user } from "@/db/schema/auth";
 import { roles, userAccounts, userRoles } from "@/db/schema/core";
 import { employees } from "@/db/schema/hr";
 import { can, requirePermission } from "@/lib/session";
 import { Badge, Card, PageHeader, StatTile, TableShell, Td, Th, Tr } from "@/components/ui";
-import { NewUserForm, RoleAssigner, ToggleUserButton } from "./forms";
+import { DeleteUserButton, NewUserForm, RoleAssigner, ToggleUserButton } from "./forms";
 
 export const metadata = { title: "Users" };
 
@@ -34,7 +34,7 @@ export default async function UsersPage() {
       .leftJoin(employees, eq(employees.id, userAccounts.employeeId))
       .leftJoin(userRoles, eq(userRoles.userId, user.id))
       .leftJoin(roles, eq(roles.id, userRoles.roleId))
-      .where(eq(userAccounts.orgId, viewer.orgId))
+      .where(and(eq(userAccounts.orgId, viewer.orgId), isNull(userAccounts.deletedAt)))
       .groupBy(
         user.id, user.name, user.email,
         userAccounts.isActive, userAccounts.mustChangePassword, userAccounts.lastLoginAt,
@@ -56,7 +56,7 @@ export default async function UsersPage() {
       })
       .from(employees)
       .leftJoin(userAccounts, eq(userAccounts.employeeId, employees.id))
-      .where(sql`${employees.orgId} = ${viewer.orgId} and ${userAccounts.userId} is null`)
+      .where(sql`${employees.orgId} = ${viewer.orgId} and ${employees.deletedAt} is null and ${userAccounts.userId} is null`)
       .orderBy(asc(employees.employeeCode)),
   ]);
 
@@ -67,7 +67,14 @@ export default async function UsersPage() {
     <>
       <PageHeader
         title="Users"
-        description="A login belongs to one organisation, carries one or more roles, and is usually linked to an employee record."
+        description="A login belongs to one organisation, carries one or more roles, and is usually linked to an employee record. Deleted logins wait in the recycle bin."
+        action={
+          can(viewer, "admin.recycle.manage") ? (
+            <Link href="/admin/recycle-bin?type=user" className="text-xs text-accent hover:underline">
+              Deleted logins →
+            </Link>
+          ) : null
+        }
       />
 
       <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
@@ -165,6 +172,7 @@ export default async function UsersPage() {
                         active={r.isActive}
                         isSelf={r.id === viewer.userId}
                       />
+                      <DeleteUserButton userId={r.id} email={r.email} isSelf={r.id === viewer.userId} />
                     </div>
                   </Td>
                 ) : null}

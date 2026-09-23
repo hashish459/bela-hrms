@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, count, desc, eq, gte, inArray, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { holidays } from "@/db/schema/core";
@@ -60,7 +60,7 @@ export default async function DashboardPage() {
       db
         .select({ n: count() })
         .from(employees)
-        .where(and(eq(employees.orgId, orgId), inArray(employees.status, [...EMPLOYED_STATUSES]))),
+        .where(and(eq(employees.orgId, orgId), onStrength())),
 
       db
         .select({ n: count() })
@@ -91,7 +91,7 @@ export default async function DashboardPage() {
           employees,
           and(
             eq(employees.departmentId, departments.id),
-            inArray(employees.status, [...EMPLOYED_STATUSES]),
+            onStrength(),
           ),
         )
         .where(eq(departments.orgId, orgId))

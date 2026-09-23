@@ -1,4 +1,5 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
 import { db } from "@/db/client";
 import { designations } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
@@ -15,7 +16,7 @@ export default async function DesignationsPage() {
     db
       .select()
       .from(designations)
-      .where(eq(designations.orgId, viewer.orgId))
+      .where(and(eq(designations.orgId, viewer.orgId), notDeleted(designations)))
       .orderBy(asc(designations.hierarchyLevel), asc(designations.code)),
     usageFor(viewer.orgId, "designation"),
   ]);

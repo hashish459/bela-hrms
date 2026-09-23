@@ -1,10 +1,10 @@
 import "server-only";
 
-import { and, asc, eq, ne, sql, type SQL } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, ne, sql, type SQL } from "drizzle-orm";
 import type { PgColumn, PgTable } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema/core";
-import { employeeAssignments, employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employeeAssignments, employees, onStrength } from "@/db/schema/hr";
 import { branches, departments, designations, employmentTypes, grades } from "@/db/schema/org";
 import { levelGrades } from "@/db/schema/org-structure";
 import { leaveTypeEntitlements } from "@/db/schema/leave-policy";
@@ -114,10 +114,7 @@ const REFERENCES: Record<MasterKind, Reference[]> = {
 };
 
 const employedNow = (): SQL =>
-  sql`${employees.status} = ANY(ARRAY[${sql.join(
-    EMPLOYED_STATUSES.map((s) => sql`${s}`),
-    sql`, `,
-  )}]::employee_status[])`;
+  onStrength();
 
 /* ------------------------------------------------------------------ reading */
 
@@ -432,29 +429,79 @@ export async function setMasterActive(orgId: string, kind: MasterKind, id: strin
   });
 }
 
-/** Deletes a row nothing references. Anything referenced must be deactivated instead. */
-export async function deleteMaster(orgId: string, kind: MasterKind, id: string): Promise<void> {
+async function referencesOf(tx: Tx, kind: MasterKind, id: string): Promise<string[]> {
+  const found: string[] = [];
+  for (const ref of REFERENCES[kind]) {
+    const [{ n }] = await tx
+      .select({ n: sql<number>`count(*)::int` })
+      .from(ref.table)
+      .where(eq(ref.column, id));
+    if (n > 0) found.push(`${n} ${ref.label}${n === 1 ? "" : "s"}`);
+  }
+  return found;
+}
+
+/**
+ * Moves a row nothing references to the recycle bin. Anything referenced must
+ * be deactivated instead — a deleted branch that people still sit in would
+ * vanish from every picker while their records point at it.
+ *
+ * Soft, so a mistaken delete is one click to undo: the row keeps its id, and
+ * `restoreMaster` puts it back. Its code is released at once (codes are unique
+ * among live rows only), which is what somebody re-creating it expects.
+ */
+export async function deleteMaster(orgId: string, kind: MasterKind, id: string, byLabel = "system"): Promise<void> {
   await db.transaction(async (tx) => {
     if (kind === "branch") await assertNotHeadOffice(tx, id, "delete");
     const table = TABLE[kind] as typeof designations;
-    const found: string[] = [];
-    for (const ref of REFERENCES[kind]) {
-      const [{ n }] = await tx
-        .select({ n: sql<number>`count(*)::int` })
-        .from(ref.table)
-        .where(eq(ref.column, id));
-      if (n > 0) found.push(`${n} ${ref.label}${n === 1 ? "" : "s"}`);
-    }
+    const found = await referencesOf(tx, kind, id);
     if (found.length) {
       throw new MasterError(`Still referenced by ${found.join(", ")}. Deactivate it instead — history keeps its meaning.`);
     }
 
     const deleted = await tx
-      .delete(table)
-      .where(and(eq(table.id, id), eq(table.orgId, orgId)))
+      .update(table)
+      .set({ deletedAt: new Date(), deletedBy: byLabel, isActive: false })
+      .where(and(eq(table.id, id), eq(table.orgId, orgId), isNull(table.deletedAt)))
       .returning({ id: table.id });
     if (deleted.length === 0) throw new MasterError(`That ${NOUN[kind]} no longer exists.`);
     await changed(tx, orgId, kind, id, "deleted");
+  });
+}
+
+/** Brings a binned row back, as long as its code has not been reused meanwhile. */
+export async function restoreMaster(orgId: string, kind: MasterKind, id: string): Promise<void> {
+  try {
+    await db.transaction(async (tx) => {
+      const table = TABLE[kind] as typeof designations;
+      const restored = await tx
+        .update(table)
+        .set({ deletedAt: null, deletedBy: null, isActive: true })
+        .where(and(eq(table.id, id), eq(table.orgId, orgId), isNotNull(table.deletedAt)))
+        .returning({ id: table.id });
+      if (restored.length === 0) throw new MasterError(`That ${NOUN[kind]} is not in the recycle bin.`);
+      await changed(tx, orgId, kind, id, "restored");
+    });
+  } catch (error) {
+    const { code } = pgCode(error);
+    if (code === "23505") {
+      throw new MasterError(`Another ${NOUN[kind]} now uses that code. Change its code first, then restore this one.`);
+    }
+    throw error;
+  }
+}
+
+/** Removes a binned row for good. Only ever from the recycle bin, and only if still unreferenced. */
+export async function purgeMaster(orgId: string, kind: MasterKind, id: string): Promise<void> {
+  await db.transaction(async (tx) => {
+    const table = TABLE[kind] as typeof designations;
+    const found = await referencesOf(tx, kind, id);
+    if (found.length) throw new MasterError(`Still referenced by ${found.join(", ")}; it stays in the bin.`);
+    const gone = await tx
+      .delete(table)
+      .where(and(eq(table.id, id), eq(table.orgId, orgId), isNotNull(table.deletedAt)))
+      .returning({ id: table.id });
+    if (gone.length === 0) throw new MasterError(`That ${NOUN[kind]} is not in the recycle bin.`);
   });
 }
 

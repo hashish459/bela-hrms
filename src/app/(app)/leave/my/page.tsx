@@ -1,4 +1,4 @@
-import { and, desc, eq } from "drizzle-orm";
+import { and, desc, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
 import { approvalSteps, leaveBalances, leaveRequests, leaveTypes } from "@/db/schema/leave";
@@ -89,7 +89,7 @@ export default async function MyLeavePage() {
         code: employees.employeeCode,
       })
       .from(employees)
-      .where(eq(employees.orgId, viewer.orgId))
+      .where(and(eq(employees.orgId, viewer.orgId), isNull(employees.deletedAt)))
       .orderBy(employees.employeeCode),
   ]);
 

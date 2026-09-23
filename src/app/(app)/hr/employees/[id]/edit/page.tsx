@@ -1,6 +1,6 @@
 import Link from "next/link";
 import { notFound } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { ArrowLeft } from "lucide-react";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
@@ -18,11 +18,15 @@ export default async function EditEmployeePage({ params }: PageProps<"/hr/employ
   const [employee] = await db
     .select()
     .from(employees)
-    .where(and(eq(employees.id, id), eq(employees.orgId, viewer.orgId)))
+    .where(and(eq(employees.id, id), eq(employees.orgId, viewer.orgId), isNull(employees.deletedAt)))
     .limit(1);
 
   if (!employee) notFound();
   const options = await loadEmployeeFormOptions(viewer.orgId);
+  const canSeeSalary = can(viewer, "hr.employee.viewSalary");
+  // Never serialise a figure to the browser that the viewer may not see; the
+  // save action leaves salary untouched for them anyway.
+  const defaults = canSeeSalary ? employee : { ...employee, basicSalary: null };
 
   return (
     <>
@@ -34,11 +38,7 @@ export default async function EditEmployeePage({ params }: PageProps<"/hr/employ
         {employee.firstName} {employee.lastName}
       </Link>
       <PageHeader title="Edit employee" description={employee.employeeCode} />
-      <EmployeeForm
-        employee={employee}
-        options={options}
-        canSeeSalary={can(viewer, "hr.employee.viewSalary")}
-      />
+      <EmployeeForm employee={defaults} options={options} canSeeSalary={canSeeSalary} />
     </>
   );
 }

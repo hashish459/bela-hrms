@@ -30,7 +30,7 @@ export default async function PlannedScreen({ params }: PageProps<"/[module]/[[.
   const { item, module: mod } = entry;
 
   // the rest of this module, so somebody landing here can see the shape of it
-  const siblings = visibleNavigation(viewer.permissions).find((m) => m.id === mod.id);
+  const siblings = visibleNavigation(viewer.permissions, { hasEmployee: !!viewer.employeeId }).find((m) => m.id === mod.id);
 
   return (
     <>

@@ -1,4 +1,5 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
 import { db } from "@/db/client";
 import { leaveTypes } from "@/db/schema/leave";
 import { employmentTypes } from "@/db/schema/org";
@@ -22,7 +23,7 @@ export default async function LeavePolicyPage() {
     db
       .select({ id: employmentTypes.id, name: employmentTypes.name })
       .from(employmentTypes)
-      .where(eq(employmentTypes.orgId, viewer.orgId))
+      .where(and(eq(employmentTypes.orgId, viewer.orgId), notDeleted(employmentTypes)))
       .orderBy(asc(employmentTypes.name)),
     listLeaveGroups(viewer.orgId),
   ]);

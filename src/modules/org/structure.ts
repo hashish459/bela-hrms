@@ -1,10 +1,11 @@
 import "server-only";
+import { notDeleted } from "@/db/schema/columns";
 
-import { and, asc, eq, inArray, isNull, ne, or, sql } from "drizzle-orm";
+import { and, asc, eq, inArray, isNotNull, isNull, ne, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { branches, departments } from "@/db/schema/org";
 import { orgUnits, type orgUnitKind } from "@/db/schema/org-structure";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { publish, type Tx } from "@/kernel/events";
 import type { OrgUnit, OrgUnitKind } from "@/kernel/ports";
@@ -259,6 +260,7 @@ export async function listUnits(orgId: string, kind: OrgUnitKind): Promise<OrgUn
       .where(
         and(
           eq(departments.orgId, orgId),
+          notDeleted(departments),
           kind === "section" ? ne(departments.parentId, sql`NULL`) : isNull(departments.parentId),
         ),
       )
@@ -276,7 +278,7 @@ export async function listUnits(orgId: string, kind: OrgUnitKind): Promise<OrgUn
         isActive: branches.isActive,
       })
       .from(branches)
-      .where(eq(branches.orgId, orgId))
+      .where(and(eq(branches.orgId, orgId), notDeleted(branches)))
       .orderBy(asc(branches.code));
     return rows.map((r) => ({ ...r, kind }));
   }
@@ -290,7 +292,7 @@ export async function listUnits(orgId: string, kind: OrgUnitKind): Promise<OrgUn
       isActive: orgUnits.isActive,
     })
     .from(orgUnits)
-    .where(and(eq(orgUnits.orgId, orgId), eq(orgUnits.kind, kind as GenericKind)))
+    .where(and(eq(orgUnits.orgId, orgId), eq(orgUnits.kind, kind as GenericKind), isNull(orgUnits.deletedAt)))
     .orderBy(asc(orgUnits.sortOrder), asc(orgUnits.code));
   return rows.map((r) => ({ ...r, kind }));
 }
@@ -403,7 +405,7 @@ export async function listUnitRows(orgId: string, kind: GenericKind) {
   return db
     .select()
     .from(orgUnits)
-    .where(and(eq(orgUnits.orgId, orgId), eq(orgUnits.kind, kind)))
+    .where(and(eq(orgUnits.orgId, orgId), eq(orgUnits.kind, kind), isNull(orgUnits.deletedAt)))
     .orderBy(asc(orgUnits.sortOrder), asc(orgUnits.code));
 }
 
@@ -412,7 +414,7 @@ export async function unitsWithChildren(orgId: string): Promise<Set<string>> {
   const rows = await db
     .selectDistinct({ parentId: orgUnits.parentId })
     .from(orgUnits)
-    .where(and(eq(orgUnits.orgId, orgId), ne(orgUnits.parentId, sql`NULL`)));
+    .where(and(eq(orgUnits.orgId, orgId), ne(orgUnits.parentId, sql`NULL`), isNull(orgUnits.deletedAt)));
   return new Set(rows.map((r) => r.parentId).filter((v): v is string => !!v));
 }
 
@@ -446,7 +448,7 @@ export async function setUnitActive(orgId: string, id: string, active: boolean):
           .where(
             and(
               eq(column, id),
-              inArray(employees.status, [...EMPLOYED_STATUSES]),
+              onStrength(),
             ),
           );
         if (n > 0) {
@@ -474,10 +476,17 @@ export async function setUnitActive(orgId: string, id: string, active: boolean):
   });
 }
 
-/** Deletes a unit that nothing — no employee, past or present, and no child — points at. */
-export async function deleteUnit(orgId: string, id: string): Promise<void> {
+/**
+ * Moves a unit that nothing — no employee, past or present, and no child —
+ * points at to the recycle bin. Restorable until purged.
+ */
+export async function deleteUnit(orgId: string, id: string, byLabel = "system"): Promise<void> {
   await db.transaction(async (tx) => {
-    const [child] = await tx.select({ id: orgUnits.id }).from(orgUnits).where(eq(orgUnits.parentId, id)).limit(1);
+    const [child] = await tx
+      .select({ id: orgUnits.id })
+      .from(orgUnits)
+      .where(and(eq(orgUnits.parentId, id), isNull(orgUnits.deletedAt)))
+      .limit(1);
     if (child) throw new StructureError("Units sit underneath this one. Deactivate it instead.");
 
     const [{ n }] = await tx
@@ -499,8 +508,9 @@ export async function deleteUnit(orgId: string, id: string): Promise<void> {
     }
 
     const deleted = await tx
-      .delete(orgUnits)
-      .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId)))
+      .update(orgUnits)
+      .set({ deletedAt: new Date(), deletedBy: byLabel, isActive: false })
+      .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId), isNull(orgUnits.deletedAt)))
       .returning({ id: orgUnits.id });
     if (deleted.length === 0) throw new StructureError("That unit no longer exists.");
 
@@ -511,4 +521,50 @@ export async function deleteUnit(orgId: string, id: string): Promise<void> {
       payload: { unitId: id, action: "deleted" },
     });
   });
+}
+
+/** Brings a binned unit back, unless its code was reused meanwhile. */
+export async function restoreUnit(orgId: string, id: string): Promise<void> {
+  try {
+    await db.transaction(async (tx) => {
+      const restored = await tx
+        .update(orgUnits)
+        .set({ deletedAt: null, deletedBy: null, isActive: true })
+        .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId), isNotNull(orgUnits.deletedAt)))
+        .returning({ id: orgUnits.id, parentId: orgUnits.parentId });
+      if (restored.length === 0) throw new StructureError("That unit is not in the recycle bin.");
+      const parentId = restored[0].parentId;
+      if (parentId) {
+        const [parent] = await tx
+          .select({ deletedAt: orgUnits.deletedAt })
+          .from(orgUnits)
+          .where(eq(orgUnits.id, parentId))
+          .limit(1);
+        if (parent?.deletedAt) throw new StructureError("Its parent is in the recycle bin too. Restore the parent first.");
+      }
+      await publish(tx, {
+        orgId,
+        module: "org",
+        name: "org.structure.changed",
+        payload: { unitId: id, action: "restored" },
+      });
+    });
+  } catch (error) {
+    const e = error as { code?: string; cause?: { code?: string } };
+    if ((e?.code ?? e?.cause?.code) === "23505") {
+      throw new StructureError("Another unit of this kind now uses that code. Change its code first, then restore this one.");
+    }
+    throw error;
+  }
+}
+
+/** Removes a binned unit for good. */
+export async function purgeUnit(orgId: string, id: string): Promise<void> {
+  const [child] = await db.select({ id: orgUnits.id }).from(orgUnits).where(eq(orgUnits.parentId, id)).limit(1);
+  if (child) throw new StructureError("Other units still point at this one; it stays in the bin.");
+  const gone = await db
+    .delete(orgUnits)
+    .where(and(eq(orgUnits.id, id), eq(orgUnits.orgId, orgId), isNotNull(orgUnits.deletedAt)))
+    .returning({ id: orgUnits.id });
+  if (gone.length === 0) throw new StructureError("That unit is not in the recycle bin.");
 }

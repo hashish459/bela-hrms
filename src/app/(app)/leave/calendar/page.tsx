@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { holidays } from "@/db/schema/core";
@@ -46,10 +46,7 @@ export default async function LeaveCalendarPage({ searchParams }: PageProps<"/le
           sql`${leaveRequests.status} IN ('approved','pending')`,
           lte(leaveRequests.fromDate, to),
           gte(leaveRequests.toDate, from),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
+          onStrength(),
         ),
       )
       .orderBy(asc(employees.employeeCode)),

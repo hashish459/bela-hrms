@@ -1,10 +1,11 @@
 import "server-only";
 
 import { and, count, desc, eq, gte, inArray, isNull, lte, sql, type SQL } from "drizzle-orm";
+import { cached, cacheTags, invalidate } from "@/kernel/cache";
 import { db } from "@/db/client";
 import { user } from "@/db/schema/auth";
 import { roleGrants, roles, userAccounts, userRoles } from "@/db/schema/core";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { approvalSteps } from "@/db/schema/approvals";
 import { leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { employeeDocuments } from "@/db/schema/selfservice";
@@ -48,7 +49,12 @@ type Recipients = { userId: string; email: string; name: string }[];
 /* -------------------------------------------------------------------- rules */
 
 export async function loadRules(orgId: string): Promise<Map<string, EffectiveRule>> {
-  const overrides = await db.select().from(notificationRules).where(eq(notificationRules.orgId, orgId));
+  // every notification reads the rules; they change when an admin edits one
+  const overrides = await cached(
+    `notify-rules:${orgId}`,
+    () => db.select().from(notificationRules).where(eq(notificationRules.orgId, orgId)),
+    { ttl: 300, tags: [cacheTags.notificationRules(orgId), cacheTags.org(orgId)] },
+  );
   const byKey = new Map(overrides.map((o) => [o.eventKey, o]));
   return new Map(CATALOGUE.map((entry) => [entry.key, effectiveRule(entry, byKey.get(entry.key))]));
 }
@@ -76,16 +82,18 @@ export async function saveRule(orgId: string, key: string, input: RuleInput, byL
     .insert(notificationRules)
     .values({ orgId, eventKey: key, ...values })
     .onConflictDoUpdate({ target: [notificationRules.orgId, notificationRules.eventKey], set: values });
+  invalidate(cacheTags.notificationRules(orgId));
 }
 
 /** Back to the catalogue default: the override row simply goes. */
 export async function resetRule(orgId: string, key: string): Promise<void> {
   await db.delete(notificationRules).where(and(eq(notificationRules.orgId, orgId), eq(notificationRules.eventKey, key)));
+  invalidate(cacheTags.notificationRules(orgId));
 }
 
 /* --------------------------------------------------------------- recipients */
 
-const employedNow = (): SQL => inArray(employees.status, [...EMPLOYED_STATUSES]);
+const employedNow = (): SQL => onStrength();
 
 /** Active user accounts behind a set of employees. */
 async function usersForEmployees(orgId: string, employeeIds: (string | null | undefined)[]): Promise<Recipients> {
@@ -554,6 +562,7 @@ export async function sweepReminders(orgId: string, opts: { force?: boolean } = 
         and(
           eq(employees.orgId, orgId),
           employedNow(),
+          isNull(employeeDocuments.deletedAt),
           gte(employeeDocuments.expiresOn, today),
           lte(employeeDocuments.expiresOn, until),
         ),

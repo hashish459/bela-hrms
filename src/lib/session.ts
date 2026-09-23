@@ -3,10 +3,11 @@ import "server-only";
 import { cache } from "react";
 import { cookies, headers } from "next/headers";
 import { forbidden, redirect } from "next/navigation";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { fiscalYears, organizations, roleGrants, roles, userAccounts, userRoles } from "@/db/schema/core";
-import { employees } from "@/db/schema/hr";
+import { employees, liveEmployee } from "@/db/schema/hr";
+import { cached, cacheTags } from "@/kernel/cache";
 import { auth } from "@/lib/auth";
 import { ALL_PERMISSIONS, isKnownPermission, type Permission } from "@/modules/registry";
 
@@ -47,38 +48,14 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
   const result = await auth.api.getSession({ headers: await headers() });
   if (!result?.user) return null;
 
-  const [account] = await db
-    .select({
-      orgId: userAccounts.orgId,
-      employeeId: userAccounts.employeeId,
-      isActive: userAccounts.isActive,
-      isSystemAdmin: userAccounts.isSystemAdmin,
-      orgName: organizations.name,
-      orgCode: organizations.code,
-    })
-    .from(userAccounts)
-    .innerJoin(organizations, eq(organizations.id, userAccounts.orgId))
-    .where(eq(userAccounts.userId, result.user.id))
-    .limit(1);
+  const authz = await loadAuthz(result.user.id);
 
-  // A login with no application account, or a disabled one, is not a viewer.
-  if (!account || !account.isActive) return null;
+  // A login with no application account, or a disabled or deleted one, is not a viewer.
+  if (!authz) return null;
+  const { account } = authz;
 
-  const grantRows = await db
-    .select({ permission: roleGrants.permission, roleName: roles.name })
-    .from(userRoles)
-    .innerJoin(roles, eq(roles.id, userRoles.roleId))
-    .leftJoin(roleGrants, eq(roleGrants.roleId, roles.id))
-    .where(and(eq(userRoles.userId, result.user.id), eq(roles.orgId, account.orgId)));
-
-  const permissions = new Set<Permission>();
-  const roleNames = new Set<string>();
-  for (const row of grantRows) {
-    roleNames.add(row.roleName);
-    // Ignore grants for permissions this build no longer defines rather than
-    // letting a stale row break the whole check.
-    if (row.permission && isKnownPermission(row.permission)) permissions.add(row.permission);
-  }
+  const permissions = new Set<Permission>(authz.permissions);
+  const roleNames = new Set<string>(authz.roleNames);
 
   // The break-glass rule. A system administrator's authority comes from the
   // account, not from a role, so revoking every role leaves it intact — the
@@ -112,10 +89,15 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
       // A cookie naming a role that has since been deleted, or one from another
       // organisation, is ignored rather than trusted.
       if (assumed) {
-        const assumedGrants = await db
-          .select({ permission: roleGrants.permission })
-          .from(roleGrants)
-          .where(eq(roleGrants.roleId, assumed.id));
+        const assumedGrants = await cached(
+          `authz:role:${assumed.id}`,
+          () =>
+            db
+              .select({ permission: roleGrants.permission })
+              .from(roleGrants)
+              .where(eq(roleGrants.roleId, assumed.id)),
+          { ttl: 60, tags: [cacheTags.authz] },
+        );
 
         permissions.clear();
         for (const row of assumedGrants) {
@@ -126,26 +108,8 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     }
   }
 
-  let employeeCode: string | null = null;
-  if (account.employeeId) {
-    const [emp] = await db
-      .select({ code: employees.employeeCode })
-      .from(employees)
-      .where(eq(employees.id, account.employeeId))
-      .limit(1);
-    employeeCode = emp?.code ?? null;
-  }
-
-  const [fy] = await db
-    .select({
-      id: fiscalYears.id,
-      code: fiscalYears.code,
-      startDate: fiscalYears.startDate,
-      endDate: fiscalYears.endDate,
-    })
-    .from(fiscalYears)
-    .where(and(eq(fiscalYears.orgId, account.orgId), eq(fiscalYears.isCurrent, true)))
-    .limit(1);
+  const employeeCode = authz.employeeCode;
+  const fy = await currentFiscalYear(account.orgId);
 
   return {
     userId: result.user.id,
@@ -154,7 +118,9 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     orgId: account.orgId,
     orgName: account.orgName,
     orgCode: account.orgCode,
-    employeeId: account.employeeId,
+    // A login linked to an employee record that has since been deleted has no
+    // desk: treat it as unlinked rather than open a desk onto a binned record.
+    employeeId: employeeCode ? account.employeeId : null,
     employeeCode,
     /*
      * The account's own identity, never the assumed one.
@@ -175,6 +141,90 @@ export const getViewer = cache(async (): Promise<Viewer | null> => {
     fiscalYear: fy ?? null,
   };
 });
+
+/**
+ * Everything about a login that is not the session itself: the account, its
+ * grants, its role names and its employee code. Read on every request, changed
+ * a few times a month — so cached, and invalidated by every write that can
+ * change the answer (users, roles, grants, employee links; see `cacheTags.authz`).
+ */
+function loadAuthz(userId: string) {
+  return cached(
+    `authz:user:${userId}`,
+    async () => {
+      const [account] = await db
+        .select({
+          orgId: userAccounts.orgId,
+          employeeId: userAccounts.employeeId,
+          isActive: userAccounts.isActive,
+          isSystemAdmin: userAccounts.isSystemAdmin,
+          orgName: organizations.name,
+          orgCode: organizations.code,
+        })
+        .from(userAccounts)
+        .innerJoin(organizations, eq(organizations.id, userAccounts.orgId))
+        .where(and(eq(userAccounts.userId, userId), isNull(userAccounts.deletedAt)))
+        .limit(1);
+
+      if (!account || !account.isActive) return null;
+
+      const [grantRows, emp] = await Promise.all([
+        db
+          .select({ permission: roleGrants.permission, roleName: roles.name })
+          .from(userRoles)
+          .innerJoin(roles, eq(roles.id, userRoles.roleId))
+          .leftJoin(roleGrants, eq(roleGrants.roleId, roles.id))
+          .where(and(eq(userRoles.userId, userId), eq(roles.orgId, account.orgId))),
+        account.employeeId
+          ? db
+              .select({ code: employees.employeeCode })
+              .from(employees)
+              .where(and(eq(employees.id, account.employeeId), liveEmployee()))
+              .limit(1)
+              .then((r) => r[0] ?? null)
+          : Promise.resolve(null),
+      ]);
+
+      const permissions: Permission[] = [];
+      const roleNames = new Set<string>();
+      for (const row of grantRows) {
+        roleNames.add(row.roleName);
+        // Ignore grants for permissions this build no longer defines rather than
+        // letting a stale row break the whole check.
+        if (row.permission && isKnownPermission(row.permission)) permissions.push(row.permission);
+      }
+
+      return {
+        account,
+        permissions,
+        roleNames: [...roleNames],
+        employeeCode: emp?.code ?? null,
+      };
+    },
+    { ttl: 60, tags: [cacheTags.authz, cacheTags.user(userId)] },
+  );
+}
+
+/** The organisation's current fiscal year; changes once a year, read on every request. */
+export function currentFiscalYear(orgId: string) {
+  return cached(
+    `fy:${orgId}`,
+    async () => {
+      const [fy] = await db
+        .select({
+          id: fiscalYears.id,
+          code: fiscalYears.code,
+          startDate: fiscalYears.startDate,
+          endDate: fiscalYears.endDate,
+        })
+        .from(fiscalYears)
+        .where(and(eq(fiscalYears.orgId, orgId), eq(fiscalYears.isCurrent, true)))
+        .limit(1);
+      return fy ?? null;
+    },
+    { ttl: 300, tags: [cacheTags.fiscalYear(orgId), cacheTags.org(orgId)] },
+  );
+}
 
 /** For pages: redirects to the login screen when there is no viewer. */
 export async function requireViewer(): Promise<Viewer> {

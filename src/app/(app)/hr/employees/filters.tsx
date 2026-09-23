@@ -19,8 +19,10 @@ const STATUS_OPTIONS = [
 
 export function EmployeeFilters({
   departments,
+  branches,
 }: {
   departments: { id: string; name: string }[];
+  branches: { id: string; name: string }[];
 }) {
   const router = useRouter();
   const params = useSearchParams();
@@ -38,8 +40,9 @@ export function EmployeeFilters({
 
   const q = params.get("q") ?? "";
   const dept = params.get("dept") ?? "";
+  const branch = params.get("branch") ?? "";
   const status = params.get("status") ?? "employed";
-  const dirty = q || dept || status !== "employed";
+  const dirty = q || dept || branch || status !== "employed";
 
   return (
     <div
@@ -62,6 +65,15 @@ export function EmployeeFilters({
         {departments.map((d) => (
           <option key={d.id} value={d.id}>
             {d.name}
+          </option>
+        ))}
+      </Select>
+
+      <Select value={branch} onChange={(e) => update("branch", e.target.value)} className="w-44">
+        <option value="">All branches</option>
+        {branches.map((b) => (
+          <option key={b.id} value={b.id}>
+            {b.name}
           </option>
         ))}
       </Select>

@@ -29,6 +29,7 @@ import {
   unique,
   uuid,
 } from "drizzle-orm/pg-core";
+import { softDelete } from "./columns";
 import { organizations } from "./core";
 import { files } from "./files";
 import { branches, departments } from "./org";
@@ -79,6 +80,7 @@ export const employeeFamily = pgTable(
     nomineeSharePercent: integer("nominee_share_percent"),
     isEmergencyContact: boolean("is_emergency_contact").notNull().default(false),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    ...softDelete,
   },
   (t) => [index("employee_family_employee_idx").on(t.employeeId)],
 );
@@ -114,8 +116,39 @@ export const employeeQualifications = pgTable(
     expiresOn: date("expires_on"),
     remarks: text("remarks"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    ...softDelete,
   },
   (t) => [index("employee_qualifications_employee_idx").on(t.employeeId, t.kind)],
+);
+
+/**
+ * Previous employment — the "Experience" tab of a personnel file.
+ *
+ * Kept apart from qualifications because the questions differ: service
+ * elsewhere counts towards seniority and gratuity in some policies, and a
+ * reference check needs the employer and the dates, not a grade.
+ */
+export const employeeExperience = pgTable(
+  "employee_experience",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    employer: text("employer").notNull(),
+    designation: text("designation"),
+    fromDate: date("from_date"),
+    toDate: date("to_date"),
+    responsibilities: text("responsibilities"),
+    reasonForLeaving: text("reason_for_leaving"),
+    referenceContact: text("reference_contact"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+    ...softDelete,
+  },
+  (t) => [index("employee_experience_employee_idx").on(t.employeeId, t.fromDate)],
 );
 
 export const documentKind = pgEnum("employee_document_kind", [
@@ -196,6 +229,7 @@ export const employeeDocuments = pgTable(
     uploadedBy: text("uploaded_by"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
     updatedAt: timestamp("updated_at").notNull().defaultNow(),
+    ...softDelete,
   },
   (t) => [
     index("employee_documents_employee_idx").on(t.employeeId),
@@ -248,6 +282,7 @@ export const notices = pgTable(
     postedBy: text("posted_by"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    ...softDelete,
   },
   (t) => [index("notices_org_window_idx").on(t.orgId, t.publishFrom)],
 );

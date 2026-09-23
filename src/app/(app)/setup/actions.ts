@@ -6,6 +6,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { auditLog, fiscalYears, holidays, periodLocks } from "@/db/schema/core";
 import { attendanceDays } from "@/db/schema/attendance";
+import { cacheTags, invalidate } from "@/kernel/cache";
 import { requirePermission } from "@/lib/session";
 import { adToBs, bsToAd, daysInBsMonth, formatBsKey, parseBsKey, addDays } from "@/lib/bs";
 
@@ -119,6 +120,8 @@ export async function createFiscalYear(
     summary: `Created fiscal year ${code}${makeCurrent ? " and made it current" : ""}`,
   });
 
+  invalidate(cacheTags.fiscalYear(viewer.orgId));
+
   revalidatePath("/setup/fiscal-years");
   return { ok: true, message: `Fiscal year ${code} created (${startDate} to ${endDate}).` };
 }
@@ -158,6 +161,8 @@ export async function setCurrentFiscalYear(
     entityId: id,
     summary: `Made ${target.code} the current fiscal year`,
   });
+
+  invalidate(cacheTags.fiscalYear(viewer.orgId));
 
   revalidatePath("/setup/fiscal-years");
   revalidatePath("/dashboard");
@@ -263,6 +268,8 @@ export async function setPeriodLock(
     entityType: "period_lock",
     summary: `${action === "lock" ? "Locked" : "Unlocked"} ${module} for month ${bsMonth} of ${fy.code}`,
   });
+
+  invalidate(cacheTags.fiscalYear(viewer.orgId));
 
   revalidatePath("/setup/fiscal-years");
   revalidatePath("/attendance/monthly");

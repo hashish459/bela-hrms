@@ -227,6 +227,9 @@ export const leaveRequests = pgTable(
     unique("leave_requests_org_reference_key").on(t.orgId, t.reference),
     index("leave_requests_employee_idx").on(t.employeeId, t.fromDate),
     index("leave_requests_org_status_idx").on(t.orgId, t.status),
+    // calendars and reports read by date range across the organisation
+    index("leave_requests_org_dates_idx").on(t.orgId, t.fromDate, t.toDate),
+    index("leave_requests_type_idx").on(t.leaveTypeId),
   ],
 );
 

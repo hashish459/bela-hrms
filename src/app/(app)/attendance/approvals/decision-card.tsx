@@ -6,6 +6,7 @@ import { AlertCircle, ArrowRight, Check, CheckCircle2, Loader2, X } from "lucide
 import { decideAttendance, type ActionState } from "../actions";
 import { Badge, Button, Card, Textarea } from "@/components/ui";
 import { formatDuration, shortTime } from "@/lib/attendance/calc";
+import { formatAdDate } from "@/lib/utils";
 
 const initial: ActionState = { ok: false };
 
@@ -76,11 +77,7 @@ export function AttendanceDecisionCard({ request: r }: { request: Request }) {
           <p className="text-[11px] text-ink-faint">Date (BS)</p>
           <p className="tabular mt-0.5 text-sm text-ink">{r.dateBs}</p>
           <p className="tabular text-[11px] text-ink-faint">
-            {new Date(r.date).toLocaleDateString("en-GB", {
-              weekday: "short",
-              day: "2-digit",
-              month: "short",
-            })}
+            {formatAdDate(r.date, { weekday: true })}
           </p>
         </div>
         <div>

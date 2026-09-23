@@ -7,7 +7,7 @@
  * tree down. Here a root has `parentId = NULL` and the foreign key is enforced,
  * so a dangling parent cannot be inserted in the first place.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   index,
@@ -16,10 +16,11 @@ import {
   pgTable,
   text,
   timestamp,
-  unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { softDelete } from "./columns";
 import { organizations } from "./core";
 
 export const branches = pgTable(
@@ -40,10 +41,11 @@ export const branches = pgTable(
     phone: text("phone"),
     isHeadOffice: boolean("is_head_office").notNull().default(false),
     isActive: boolean("is_active").notNull().default(true),
+    ...softDelete,
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
-    unique("branches_org_code_key").on(t.orgId, t.code),
+    uniqueIndex("branches_org_code_key").on(t.orgId, t.code).where(sql`deleted_at is null`),
     index("branches_org_idx").on(t.orgId),
   ],
 );
@@ -64,10 +66,11 @@ export const departments = pgTable(
     /** Resolved lazily - the head is an employee, and employees reference departments. */
     headEmployeeId: uuid("head_employee_id"),
     isActive: boolean("is_active").notNull().default(true),
+    ...softDelete,
     createdAt: timestamp("created_at").notNull().defaultNow(),
   },
   (t) => [
-    unique("departments_org_code_key").on(t.orgId, t.code),
+    uniqueIndex("departments_org_code_key").on(t.orgId, t.code).where(sql`deleted_at is null`),
     index("departments_org_idx").on(t.orgId),
   ],
 );
@@ -85,8 +88,9 @@ export const designations = pgTable(
     /** 1 is most senior. Drives approval routing and seniority reports. */
     hierarchyLevel: integer("hierarchy_level").notNull().default(50),
     isActive: boolean("is_active").notNull().default(true),
+    ...softDelete,
   },
-  (t) => [unique("designations_org_code_key").on(t.orgId, t.code)],
+  (t) => [uniqueIndex("designations_org_code_key").on(t.orgId, t.code).where(sql`deleted_at is null`)],
 );
 
 export const employmentTypes = pgTable(
@@ -101,8 +105,9 @@ export const employmentTypes = pgTable(
     /** Contract and probation staff usually accrue leave differently. */
     accruesLeave: boolean("accrues_leave").notNull().default(true),
     isActive: boolean("is_active").notNull().default(true),
+    ...softDelete,
   },
-  (t) => [unique("employment_types_org_code_key").on(t.orgId, t.code)],
+  (t) => [uniqueIndex("employment_types_org_code_key").on(t.orgId, t.code).where(sql`deleted_at is null`)],
 );
 
 export const grades = pgTable(
@@ -118,8 +123,9 @@ export const grades = pgTable(
     /** Nepalese rupees. numeric, never float - this feeds payroll. */
     basicSalary: numeric("basic_salary", { precision: 14, scale: 2 }),
     isActive: boolean("is_active").notNull().default(true),
+    ...softDelete,
   },
-  (t) => [unique("grades_org_code_key").on(t.orgId, t.code)],
+  (t) => [uniqueIndex("grades_org_code_key").on(t.orgId, t.code).where(sql`deleted_at is null`)],
 );
 
 export const branchesRelations = relations(branches, ({ one, many }) => ({

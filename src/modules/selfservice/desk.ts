@@ -4,11 +4,12 @@ import { and, asc, desc, eq, gte, isNull, lte, or, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { holidays } from "@/db/schema/core";
 import { branches, departments, designations, employmentTypes, grades } from "@/db/schema/org";
-import { employeeAssignments, employees } from "@/db/schema/hr";
+import { employeeAssignments, employees, onStrength } from "@/db/schema/hr";
 import { leaveBalances, leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { attendanceDays } from "@/db/schema/attendance";
 import {
   employeeDocuments,
+  employeeExperience,
   employeeFamily,
   employeeQualifications,
   noticeReads,
@@ -110,7 +111,7 @@ export async function family(ctx: SelfContext) {
   return db
     .select()
     .from(employeeFamily)
-    .where(eq(employeeFamily.employeeId, ctx.employeeId))
+    .where(and(eq(employeeFamily.employeeId, ctx.employeeId), isNull(employeeFamily.deletedAt)))
     .orderBy(asc(employeeFamily.relationship), asc(employeeFamily.fullName));
 }
 
@@ -118,8 +119,16 @@ export async function qualifications(ctx: SelfContext) {
   return db
     .select()
     .from(employeeQualifications)
-    .where(eq(employeeQualifications.employeeId, ctx.employeeId))
+    .where(and(eq(employeeQualifications.employeeId, ctx.employeeId), isNull(employeeQualifications.deletedAt)))
     .orderBy(desc(employeeQualifications.completedYear), asc(employeeQualifications.title));
+}
+
+export async function experience(ctx: SelfContext) {
+  return db
+    .select()
+    .from(employeeExperience)
+    .where(and(eq(employeeExperience.employeeId, ctx.employeeId), isNull(employeeExperience.deletedAt)))
+    .orderBy(desc(employeeExperience.fromDate));
 }
 
 /**
@@ -136,6 +145,7 @@ export async function documents(ctx: SelfContext) {
       and(
         eq(employeeDocuments.employeeId, ctx.employeeId),
         eq(employeeDocuments.isVisibleToEmployee, true),
+        isNull(employeeDocuments.deletedAt),
       ),
     )
     .orderBy(desc(employeeDocuments.issuedOn));
@@ -168,6 +178,7 @@ export async function noticeBoard(ctx: SelfContext, options: { unreadOnly?: bool
       and(
         eq(notices.orgId, ctx.orgId),
         eq(notices.isActive, true),
+        isNull(notices.deletedAt),
         lte(notices.publishFrom, today),
         or(isNull(notices.publishTo), gte(notices.publishTo, today)),
         or(
@@ -321,6 +332,7 @@ export async function deskSummary(ctx: SelfContext) {
       .where(
         and(
           eq(employees.orgId, ctx.orgId),
+          sql`${employees.deletedAt} IS NULL`,
           sql`${employees.dateOfBirth} IS NOT NULL`,
           sql`to_char(${employees.dateOfBirth}, 'MM-DD') BETWEEN to_char(${today}::date, 'MM-DD') AND to_char(${today}::date + 14, 'MM-DD')`,
         ),
@@ -372,7 +384,7 @@ export async function directory(
   ctx: SelfContext,
   filter: { q?: string; departmentId?: string; branchId?: string } = {},
 ) {
-  const conditions = [eq(employees.orgId, ctx.orgId), sql`${employees.status} <> 'resigned'`];
+  const conditions = [eq(employees.orgId, ctx.orgId), onStrength()];
 
   if (filter.q) {
     const like = `%${filter.q.toLowerCase()}%`;

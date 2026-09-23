@@ -1,4 +1,5 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
 import { db } from "@/db/client";
 import { grades } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
@@ -13,7 +14,7 @@ export const metadata = { title: "Grades" };
 export default async function GradesPage() {
   const viewer = await requirePermission("setup.structure.view");
   const [rows, usage] = await Promise.all([
-    db.select().from(grades).where(eq(grades.orgId, viewer.orgId)).orderBy(asc(grades.hierarchyLevel), asc(grades.code)),
+    db.select().from(grades).where(and(eq(grades.orgId, viewer.orgId), notDeleted(grades))).orderBy(asc(grades.hierarchyLevel), asc(grades.code)),
     usageFor(viewer.orgId, "grade"),
   ]);
 

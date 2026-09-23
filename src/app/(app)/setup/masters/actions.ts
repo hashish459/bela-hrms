@@ -6,6 +6,7 @@ import { db } from "@/db/client";
 import { auditLog } from "@/db/schema/core";
 import { requirePermission } from "@/lib/session";
 import { drainInBackground } from "@/kernel/events";
+import { cacheTags, invalidate } from "@/kernel/cache";
 import {
   deleteMaster,
   MasterError,
@@ -206,6 +207,7 @@ export async function saveMasterAction(_prev: MasterState, formData: FormData): 
     changes: Object.keys(changes).length ? changes : null,
   });
 
+  invalidate(cacheTags.masters(viewer.orgId));
   drainInBackground(viewer.orgId);
   revalidate(formData);
   return { ok: id ? "Saved." : "Added.", at: Date.now() };
@@ -237,6 +239,7 @@ export async function setActiveAction(_prev: MasterState, formData: FormData): P
     changes: { isActive: { from: !active, to: active } },
   });
 
+  invalidate(cacheTags.masters(viewer.orgId));
   drainInBackground(viewer.orgId);
   revalidate(formData);
   return { ok: active ? "Reactivated." : "Deactivated.", at: Date.now() };
@@ -249,8 +252,8 @@ export async function deleteAction(_prev: MasterState, formData: FormData): Prom
   if (!which || !id || !z.string().uuid().safeParse(id).success) return { error: "Unknown record." };
 
   try {
-    if ("kind" in which) await deleteMaster(viewer.orgId, which.kind, id);
-    else await deleteUnit(viewer.orgId, id);
+    if ("kind" in which) await deleteMaster(viewer.orgId, which.kind, id, viewer.name);
+    else await deleteUnit(viewer.orgId, id, viewer.name);
   } catch (error) {
     if (error instanceof MasterError || error instanceof StructureError) return { error: error.message };
     throw error;
@@ -263,12 +266,13 @@ export async function deleteAction(_prev: MasterState, formData: FormData): Prom
     action: "delete",
     entityType: "kind" in which ? which.kind : "org_unit",
     entityId: id,
-    summary: `Deleted ${label("kind" in which ? which.kind : which.unit)} ${text(formData, "code") ?? ""}`.trim(),
+    summary: `Moved ${label("kind" in which ? which.kind : which.unit)} ${text(formData, "code") ?? ""} to the recycle bin`.replace(/\s+/g, " "),
   });
 
+  invalidate(cacheTags.masters(viewer.orgId));
   drainInBackground(viewer.orgId);
   revalidate(formData);
-  return { ok: "Deleted.", at: Date.now() };
+  return { ok: "Moved to the recycle bin. Restore it from Administration › Recycle Bin.", at: Date.now() };
 }
 
 /* ---------------------------------------------------------- company profile */
