@@ -1,4 +1,3 @@
-import Link from "next/link";
 import { and, asc, eq, gte, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees, onStrength } from "@/db/schema/hr";
@@ -6,12 +5,19 @@ import { departments } from "@/db/schema/org";
 import { leaveRequests, leaveTypes } from "@/db/schema/leave";
 import { holidays } from "@/db/schema/core";
 import { requirePermission } from "@/lib/session";
-import { addDays, adToBs, isSaturday, todayInNepal } from "@/lib/bs";
+import { addDays, adToBs, BS_MONTHS, isSaturday, todayInNepal, weekdayOf } from "@/lib/bs";
 import { BsMonthNav, bsMonthBounds } from "@/components/bs-month-nav";
-import { Card, EmptyState, PageHeader, StatTile } from "@/components/ui";
+import { PageHeader, StatTile } from "@/components/ui";
+import { LeaveBoard, type BoardAbsence, type BoardDay } from "./board";
+
+const AD_MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
 
 export const metadata = { title: "Leave calendar" };
 
+/**
+ * The team leave calendar: a wall-calendar month and a per-person timeline over
+ * the same data, with Saturdays and public holidays marked the Nepali way.
+ */
 export default async function LeaveCalendarPage({ searchParams }: PageProps<"/leave/calendar">) {
   const viewer = await requirePermission("leave.request.viewAll");
   const params = await searchParams;
@@ -35,6 +41,7 @@ export default async function LeaveCalendarPage({ searchParams }: PageProps<"/le
         status: leaveRequests.status,
         typeName: leaveTypes.name,
         colour: leaveTypes.colour,
+        totalDays: leaveRequests.totalDays,
       })
       .from(leaveRequests)
       .innerJoin(employees, eq(employees.id, leaveRequests.employeeId))
@@ -57,156 +64,66 @@ export default async function LeaveCalendarPage({ searchParams }: PageProps<"/le
       .where(and(eq(holidays.orgId, viewer.orgId), gte(holidays.date, from), lte(holidays.date, to))),
   ]);
 
-  const dates: string[] = [];
-  for (let d = from; d <= to; d = addDays(d, 1)) dates.push(d);
   const holidayByDate = new Map(hols.map((h) => [h.date, h.name]));
-
-  // one row per person who is away at all this month
-  const people = new Map<
-    string,
-    {
-      code: string;
-      name: string;
-      department: string | null;
-      days: Map<string, { colour: string; typeName: string; status: string; reference: string }>;
-    }
-  >();
-
-  for (const a of absences) {
-    let p = people.get(a.employeeId);
-    if (!p) {
-      p = { code: a.code, name: a.name, department: a.department, days: new Map() };
-      people.set(a.employeeId, p);
-    }
-    const start = a.fromDate > from ? a.fromDate : from;
-    const end = a.toDate < to ? a.toDate : to;
-    for (let d = start; d <= end; d = addDays(d, 1)) {
-      p.days.set(d, {
-        colour: a.colour,
-        typeName: a.typeName,
-        status: a.status,
-        reference: a.reference,
-      });
-    }
+  const days: BoardDay[] = [];
+  for (let d = from; d <= to; d = addDays(d, 1)) {
+    const [, am, ad] = d.split("-").map(Number);
+    days.push({ date: d, bsDay: adToBs(d).day, adDay: ad, adMonth: AD_MONTHS[am - 1], weekday: weekdayOf(d), holiday: holidayByDate.get(d) ?? null });
   }
 
-  const rows = [...people.entries()];
-  const peakDay = dates
-    .map((d) => ({ d, n: rows.filter(([, p]) => p.days.has(d)).length }))
-    .sort((a, b) => b.n - a.n)[0];
+  const list: BoardAbsence[] = absences.map((a) => ({
+    id: a.requestId,
+    reference: a.reference,
+    employeeId: a.employeeId,
+    code: a.code,
+    name: a.name,
+    department: a.department,
+    from: a.fromDate,
+    to: a.toDate,
+    status: a.status === "approved" ? "approved" : "pending",
+    typeName: a.typeName,
+    colour: a.colour,
+    days: String(Number(a.totalDays)),
+  }));
+
+  const awayCount = (d: string) => new Set(list.filter((a) => a.from <= d && a.to >= d).map((a) => a.employeeId)).size;
+  const peak = days.map((d) => ({ d: d.date, n: awayCount(d.date) })).sort((a, b) => b.n - a.n)[0];
+  const people = new Set(list.map((a) => a.employeeId)).size;
+  const inMonth = today >= from && today <= to;
+  const workingDays = days.filter((d) => !isSaturday(d.date) && !d.holiday).length;
+  const monthLabel = BS_MONTHS[month.month - 1];
 
   return (
     <>
       <PageHeader
         title="Leave calendar"
-        description="Who is away, and when — approved in solid, pending hatched."
+        description="Who is away, and when. Click a day for the details; arrow keys move between days. Approved is solid, pending is hatched."
         action={<BsMonthNav basePath="/leave/calendar" current={month} />}
       />
 
-      <div className="grid gap-3 sm:grid-cols-2 lg:grid-cols-4">
-        <StatTile label="People away this month" value={rows.length} tone="accent" />
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile
+          label={inMonth ? "Away today" : "People away"}
+          value={inMonth ? awayCount(today) : people}
+          sub={inMonth ? `${people} away at some point this month` : `in ${monthLabel} ${month.year}`}
+          tone="accent"
+        />
         <StatTile
           label="Busiest day"
-          value={peakDay?.n ?? 0}
-          sub={peakDay?.n ? `${adToBs(peakDay.d).day} ${monthName(month.month)} away` : "Nobody away"}
-          tone={(peakDay?.n ?? 0) > 3 ? "warn" : "neutral"}
+          value={peak?.n ?? 0}
+          sub={peak?.n ? `${adToBs(peak.d).day} ${monthLabel}` : "Nobody away"}
+          tone={(peak?.n ?? 0) > 3 ? "warn" : "neutral"}
         />
-        <StatTile label="Holidays" value={hols.length} tone="info" />
-        <StatTile
-          label="Absence entries"
-          value={absences.length}
-          sub={`${absences.filter((a) => a.status === "pending").length} still pending`}
-        />
+        <StatTile label="Public holidays" value={hols.length} sub={`${workingDays} working days`} tone="info" />
+        <StatTile label="Requests" value={list.length} sub={`${list.filter((a) => a.status === "pending").length} still pending`} />
       </div>
 
-      <div className="mt-4">
-        {rows.length === 0 ? (
-          <Card>
-            <EmptyState title="Nobody is on leave this month" />
-          </Card>
-        ) : (
-          <div className="overflow-x-auto rounded-md border border-line bg-surface">
-            <table className="w-full border-collapse text-sm">
-              <thead>
-                <tr>
-                  <th className="sticky left-0 z-10 border-b border-line bg-sunk px-3 py-2 text-left text-[11px] font-medium tracking-wide text-ink-faint uppercase">
-                    Employee
-                  </th>
-                  {dates.map((d) => {
-                    const off = isSaturday(d) || holidayByDate.has(d);
-                    return (
-                      <th
-                        key={d}
-                        title={holidayByDate.get(d) ?? undefined}
-                        className={`border-b border-line px-0 py-2 text-center text-[10px] font-medium ${
-                          off ? "bg-sunk text-ink-faint" : "bg-sunk text-ink-soft"
-                        }`}
-                      >
-                        <span className="tabular block w-6">{adToBs(d).day}</span>
-                      </th>
-                    );
-                  })}
-                </tr>
-              </thead>
-              <tbody>
-                {rows.map(([id, p]) => (
-                  <tr key={id} className="hover:bg-sunk/40">
-                    <td className="sticky left-0 z-10 border-b border-line-soft bg-surface px-3 py-1.5 whitespace-nowrap">
-                      <Link
-                        href={`/hr/employees/${id}`}
-                        className="text-sm font-medium text-ink hover:text-accent"
-                      >
-                        {p.name}
-                      </Link>
-                      <span className="ml-1.5 font-mono text-[11px] text-ink-faint">{p.code}</span>
-                    </td>
-                    {dates.map((d) => {
-                      const cell = p.days.get(d);
-                      const off = isSaturday(d) || holidayByDate.has(d);
-                      return (
-                        <td
-                          key={d}
-                          title={
-                            cell
-                              ? `${cell.typeName} · ${cell.status} · ${cell.reference}`
-                              : holidayByDate.get(d) ?? undefined
-                          }
-                          className={`border-b border-line-soft p-0 ${off && !cell ? "bg-sunk" : ""}`}
-                        >
-                          <span
-                            className="block h-6 w-6"
-                            style={
-                              cell
-                                ? cell.status === "approved"
-                                  ? { background: cell.colour }
-                                  : {
-                                      backgroundImage: `repeating-linear-gradient(45deg, ${cell.colour}, ${cell.colour} 3px, transparent 3px, transparent 6px)`,
-                                    }
-                                : undefined
-                            }
-                          />
-                        </td>
-                      );
-                    })}
-                  </tr>
-                ))}
-              </tbody>
-            </table>
-          </div>
-        )}
-      </div>
+      <LeaveBoard key={`${month.year}-${month.month}`} days={days} absences={list} today={today} monthLabel={monthLabel} />
 
       <p className="mt-3 text-[11px] text-ink-faint">
-        Colour is the leave type. Grey columns are Saturdays and public holidays — they are not
+        Colour is the leave type — click one in the legend to hide it. Saturdays and public holidays are tinted; they are not
         deducted from anybody&apos;s balance.
       </p>
     </>
   );
-}
-
-function monthName(m: number) {
-  return [
-    "Baisakh", "Jestha", "Ashadh", "Shrawan", "Bhadra", "Ashwin",
-    "Kartik", "Mangsir", "Poush", "Magh", "Falgun", "Chaitra",
-  ][m - 1];
 }

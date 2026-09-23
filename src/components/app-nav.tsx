@@ -94,6 +94,23 @@ export function locate(modules: NavModule[], pathname: string) {
   return best;
 }
 
+/**
+ * Arrow keys walk the sidebar's links and module headers, Home and End jump to
+ * the ends — so the whole navigation works without Tab-ing through it.
+ */
+function arrowNav(e: React.KeyboardEvent<HTMLElement>) {
+  if (!["ArrowDown", "ArrowUp", "Home", "End"].includes(e.key)) return;
+  const el = e.target as HTMLElement;
+  if (el.tagName === "INPUT" && (e.key === "Home" || e.key === "End")) return;
+  const items = Array.from(e.currentTarget.querySelectorAll<HTMLElement>("a[href], button:not([disabled]), input[type=search]"));
+  if (!items.length) return;
+  const at = items.indexOf(document.activeElement as HTMLElement);
+  const next =
+    e.key === "Home" ? 0 : e.key === "End" ? items.length - 1 : e.key === "ArrowDown" ? Math.min(items.length - 1, at + 1) : Math.max(0, at - 1);
+  e.preventDefault();
+  items[next]?.focus();
+}
+
 export function SidebarNav({
   modules,
   railed,
@@ -199,7 +216,7 @@ export function SidebarNav({
 
   if (railed) {
     return (
-      <nav aria-label="Modules" className="flex flex-col items-center gap-1 px-1.5 py-3">
+      <nav aria-label="Modules" className="flex flex-col items-center gap-1 px-1.5 py-3" onKeyDown={arrowNav}>
         <Link
           href="/dashboard"
           onClick={onNavigate}
@@ -255,7 +272,7 @@ export function SidebarNav({
   /* ---------------------------------------------------------------- full */
 
   return (
-    <nav aria-label="Main navigation" className="flex h-full flex-col">
+    <nav aria-label="Main navigation" className="flex h-full flex-col" onKeyDown={arrowNav}>
       <div className="px-2 pt-3 pb-2">
         <div className="relative">
           <Icons.Search

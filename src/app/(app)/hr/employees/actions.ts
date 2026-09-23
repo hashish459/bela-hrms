@@ -219,9 +219,26 @@ export async function saveEmployee(
     return { ok: true, message: "Changes saved.", employeeId };
   }
 
+  // A photograph chosen on the add form arrives with it. It is stored first, so
+  // an image the storage layer rejects stops the save rather than leaving a
+  // record created without the photograph somebody thought they attached.
+  let photoFileId: string | null = null;
+  const photo = formData.get("photo");
+  if (photo instanceof File && photo.size > 0) {
+    const stored = await putFile({
+      orgId: viewer.orgId,
+      uploadedBy: viewer.userId,
+      file: photo,
+      maxBytes: PHOTO_MAX_BYTES,
+      allow: ["image/jpeg", "image/png", "image/webp"],
+    });
+    if (!stored.ok) return { ok: false, message: stored.error, fieldErrors: { photo: stored.error } };
+    photoFileId = stored.file.id;
+  }
+
   const [created] = await db
     .insert(employees)
-    .values(values as typeof employees.$inferInsert)
+    .values({ ...(values as typeof employees.$inferInsert), photoFileId })
     .returning({ id: employees.id });
   invalidate(cacheTags.people(viewer.orgId));
 

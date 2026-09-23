@@ -222,8 +222,41 @@ body {
 }
 
 /* ---- typeface ------------------------------------------------------------ */
+:root[data-font="inter"] {
+  --font-sans: var(--font-inter), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="roboto"] {
+  --font-sans: var(--font-roboto), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="open-sans"] {
+  --font-sans: var(--font-open-sans), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="source-sans"] {
+  --font-sans: var(--font-source-sans), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="lato"] {
+  --font-sans: var(--font-lato), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="nunito"] {
+  --font-sans: var(--font-nunito), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="poppins"] {
+  --font-sans: var(--font-poppins), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="mukta"] {
+  --font-sans: var(--font-mukta), ui-sans-serif, system-ui, sans-serif;
+}
+:root[data-font="noto"] {
+  --font-sans: var(--font-noto-sans), var(--font-noto-devanagari), ui-sans-serif, system-ui, sans-serif;
+}
 :root[data-font="serif"] {
   --font-sans: var(--font-plex-serif), Georgia, "Times New Roman", serif;
+}
+:root[data-font="merriweather"] {
+  --font-sans: var(--font-merriweather), Georgia, serif;
+}
+:root[data-font="mono"] {
+  --font-sans: var(--font-plex-mono), ui-monospace, monospace;
 }
 :root[data-font="system"] {
   --font-sans: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto, sans-serif;
@@ -231,10 +264,13 @@ body {
 
 /* ---- text size ----------------------------------------------------------- */
 /* Scales everything, because the whole UI is sized in rem off the root. */
+:root[data-size="xs"]  { font-size: 12px; }
 :root[data-size="sm"]  { font-size: 13px; }
 :root[data-size="md"]  { font-size: 14px; }
 :root[data-size="lg"]  { font-size: 15px; }
 :root[data-size="xl"]  { font-size: 16px; }
+:root[data-size="2xl"] { font-size: 17px; }
+:root[data-size="3xl"] { font-size: 18px; }
 
 /* ---- density ------------------------------------------------------------- */
 /* Compact trims table and card padding for people working a full day in here. */
@@ -277,7 +313,40 @@ body {
 @media print {
   @page {
     size: A4 landscape;
-    margin: 12mm;
+    margin: 12mm 12mm 14mm;
+
+    @bottom-right {
+      content: "Page " counter(page) " of " counter(pages);
+      font-size: 8pt;
+      color: #7a8785;
+    }
+  }
+
+  /* the letterhead's footer repeats on every sheet */
+  .print-footer {
+    position: fixed;
+    bottom: 0;
+    left: 0;
+    right: 0;
+    justify-content: space-between;
+    border-top: 1px solid var(--color-line);
+    padding-top: 2mm;
+  }
+
+  body {
+    background: #fff;
+  }
+
+  /* screen-only controls: search and filter bars, pagers, skip link */
+  main form[role="search"],
+  main nav[aria-label="Pagination"],
+  [data-print-hide] {
+    display: none !important;
+  }
+
+  /* a disclosure prints open, so records read in full on paper */
+  details > :not(summary) {
+    display: block !important;
   }
 
   html:root:not([data-print-theme]) {

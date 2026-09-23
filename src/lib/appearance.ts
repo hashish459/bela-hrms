@@ -11,8 +11,11 @@
  */
 
 export const THEMES = ["system", "light", "dark"] as const;
-export const FONTS = ["sans", "serif", "system"] as const;
-export const SIZES = ["sm", "md", "lg", "xl"] as const;
+export const FONTS = [
+  "sans", "inter", "roboto", "open-sans", "source-sans", "lato", "nunito", "poppins",
+  "mukta", "noto", "serif", "merriweather", "mono", "system",
+] as const;
+export const SIZES = ["xs", "sm", "md", "lg", "xl", "2xl", "3xl"] as const;
 export const DENSITIES = ["comfortable", "compact"] as const;
 export const CONTRASTS = ["normal", "high"] as const;
 export const ACCENTS = ["teal", "brand", "blue", "indigo", "amber", "rose"] as const;
@@ -64,15 +67,50 @@ export const ACCENT_LABEL: Record<Accent, string> = {
 
 export const FONT_LABEL: Record<Font, string> = {
   sans: "IBM Plex Sans",
+  inter: "Inter",
+  roboto: "Roboto",
+  "open-sans": "Open Sans",
+  "source-sans": "Source Sans 3",
+  lato: "Lato",
+  nunito: "Nunito",
+  poppins: "Poppins",
+  mukta: "Mukta (नेपाली)",
+  noto: "Noto Sans (नेपाली)",
   serif: "IBM Plex Serif",
+  merriweather: "Merriweather",
+  mono: "IBM Plex Mono",
   system: "System default",
 };
 
+/**
+ * The stack each typeface sets `--font-sans` to. Shared by the stylesheet
+ * rules (via data-font) and the picker, which previews every option in itself.
+ */
+export const FONT_STACK: Record<Font, string> = {
+  sans: "var(--font-plex-sans), ui-sans-serif, system-ui, sans-serif",
+  inter: "var(--font-inter), ui-sans-serif, system-ui, sans-serif",
+  roboto: "var(--font-roboto), ui-sans-serif, system-ui, sans-serif",
+  "open-sans": "var(--font-open-sans), ui-sans-serif, system-ui, sans-serif",
+  "source-sans": "var(--font-source-sans), ui-sans-serif, system-ui, sans-serif",
+  lato: "var(--font-lato), ui-sans-serif, system-ui, sans-serif",
+  nunito: "var(--font-nunito), ui-sans-serif, system-ui, sans-serif",
+  poppins: "var(--font-poppins), ui-sans-serif, system-ui, sans-serif",
+  mukta: "var(--font-mukta), ui-sans-serif, system-ui, sans-serif",
+  noto: "var(--font-noto-sans), var(--font-noto-devanagari), ui-sans-serif, system-ui, sans-serif",
+  serif: "var(--font-plex-serif), Georgia, \"Times New Roman\", serif",
+  merriweather: "var(--font-merriweather), Georgia, serif",
+  mono: "var(--font-plex-mono), ui-monospace, monospace",
+  system: "ui-sans-serif, system-ui, -apple-system, \"Segoe UI\", Roboto, sans-serif",
+};
+
 export const SIZE_LABEL: Record<Size, string> = {
+  xs: "Extra small (12px)",
   sm: "Small (13px)",
   md: "Default (14px)",
   lg: "Large (15px)",
-  xl: "Largest (16px)",
+  xl: "Larger (16px)",
+  "2xl": "Extra large (17px)",
+  "3xl": "Huge (18px)",
 };
 
 export function parseAppearance(raw: string | null): Appearance {

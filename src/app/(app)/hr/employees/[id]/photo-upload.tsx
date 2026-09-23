@@ -24,7 +24,7 @@ import { removeEmployeePhoto, uploadEmployeePhoto } from "../actions";
 const MAX_EDGE = 512;
 const JPEG_QUALITY = 0.85;
 
-async function downscale(file: File): Promise<File> {
+export async function downscale(file: File): Promise<File> {
   // A browser that cannot do this sends the original; the server limit still
   // applies, so the worst case is a rejected upload with a clear message.
   if (typeof createImageBitmap !== "function") return file;

@@ -11,6 +11,7 @@ import {
   DENSITIES,
   FONTS,
   FONT_LABEL,
+  FONT_STACK,
   SIZES,
   SIZE_LABEL,
   THEMES,
@@ -166,10 +167,10 @@ export function AppearanceSettings() {
         </div>
 
         <div role="radiogroup" aria-label="Typeface">
-          <OptionRow label="Typeface">
+          <OptionRow label="Typeface" hint="Each option is shown in its own face. The Nepali-ready ones render Devanagari cleanly.">
             {FONTS.map((f) => (
               <Choice key={f} active={a.font === f} onClick={() => set({ font: f })}>
-                {FONT_LABEL[f]}
+                <span style={{ fontFamily: FONT_STACK[f] }}>{FONT_LABEL[f]}</span>
               </Choice>
             ))}
           </OptionRow>
@@ -179,6 +180,9 @@ export function AppearanceSettings() {
           <OptionRow label="Text size" hint="Scales the whole interface, not just body text.">
             {SIZES.map((s) => (
               <Choice key={s} active={a.size === s} onClick={() => set({ size: s })}>
+                <span className="font-semibold" style={{ fontSize: `${10 + SIZES.indexOf(s)}px` }} aria-hidden>
+                  A
+                </span>
                 {SIZE_LABEL[s]}
               </Choice>
             ))}
