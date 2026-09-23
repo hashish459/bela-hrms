@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { requirePermission } from "@/lib/session";
 import { adToBs, formatBs } from "@/lib/bs";
@@ -39,6 +41,7 @@ export default async function RecycleBinPage({ searchParams }: PageProps<"/admin
     </Link>
   );
 
+  const { items: pagedItems, page: pagedItemsPage } = pageOf(items, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -58,6 +61,7 @@ export default async function RecycleBinPage({ searchParams }: PageProps<"/admin
           <EmptyState title="The recycle bin is empty" hint="Anything deleted anywhere in the system appears here first." />
         </Card>
       ) : (
+        <>
         <TableShell>
           <thead>
             <tr>
@@ -69,7 +73,7 @@ export default async function RecycleBinPage({ searchParams }: PageProps<"/admin
             </tr>
           </thead>
           <tbody>
-            {items.map((item) => (
+            {pagedItems.map((item) => (
               <Tr key={`${item.type}:${item.id}`}>
                 <Td>
                   <span className="block font-medium text-ink">{item.label}</span>
@@ -87,6 +91,8 @@ export default async function RecycleBinPage({ searchParams }: PageProps<"/admin
             ))}
           </tbody>
         </TableShell>
+      <OffsetPagination page={pagedItemsPage} params={params} param="page" label="items" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

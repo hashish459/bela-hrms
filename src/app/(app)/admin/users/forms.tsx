@@ -4,6 +4,7 @@ import { useActionState, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
 import { createUser, deleteUser, setUserActive, setUserRoles, type ActionState } from "../actions";
 import { Button, Card, CardHeader, Field, Input, Select } from "@/components/ui";
+import { useConfirmSubmit } from "@/components/feedback";
 
 const initial: ActionState = { ok: false };
 
@@ -234,17 +235,19 @@ export function RoleAssigner({
 
 export function DeleteUserButton({ userId, email, isSelf }: { userId: string; email: string; isSelf: boolean }) {
   const [state, action, pending] = useActionState(deleteUser, initial);
+  const ask = useConfirmSubmit({
+    title: `Delete the login ${email}?`,
+    body: "It stops working immediately and every session is signed out. It can be restored from the recycle bin.",
+    confirmLabel: "Delete login",
+    tone: "danger",
+  });
   if (isSelf) return null;
   if (state.ok) return <span className="text-[11px] text-ok">Deleted</span>;
 
   return (
     <form
       action={action}
-      onSubmit={(e) => {
-        if (!confirm(`Delete the login ${email}? It stops working immediately and every session is signed out. It can be restored from the recycle bin.`)) {
-          e.preventDefault();
-        }
-      }}
+      onSubmit={ask}
       className="flex flex-col items-end"
     >
       <input type="hidden" name="userId" value={userId} />

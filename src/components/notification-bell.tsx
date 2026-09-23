@@ -2,14 +2,21 @@
 
 import { useCallback, useEffect, useRef, useState, useTransition } from "react";
 import Link from "next/link";
-import { useRouter } from "next/navigation";
+import { usePathname, useRouter } from "next/navigation";
 import { Bell, CheckCheck, Settings2 } from "lucide-react";
 import { bellSummary, markNotifications, type BellSummary } from "@/app/(app)/me/notifications/actions";
 import { timeAgo } from "@/lib/time-ago";
 import { cn } from "@/lib/utils";
+import { useToast } from "@/components/feedback";
 
-/** How often an open tab asks for new notifications. */
-const POLL_MS = 60_000;
+/**
+ * A safety net only: updates arrive live over the stream. If the stream is
+ * unavailable (a proxy that strips it, a database without the trigger), the
+ * bell still catches up this often.
+ */
+const POLL_MS = 120_000;
+
+const TOAST_TONE = { info: "info", success: "success", warning: "warning", danger: "danger" } as const;
 
 const DOT: Record<string, string> = {
   info: "bg-info",
@@ -19,13 +26,13 @@ const DOT: Record<string, string> = {
 };
 
 /**
- * The bell in the header.
+ * The bell in the header, live.
  *
  * It starts from the count the server rendered, so the badge is right on the
- * first paint, then refreshes every minute and whenever the tab comes back into
- * focus — the moment somebody returns to the app is exactly when they want to
- * know what arrived. Polling rather than a socket: the numbers here change on
- * a human timescale, and a poll needs no extra infrastructure to deploy.
+ * first paint, then listens on a server-sent-events stream: the moment a
+ * notification is written for this user — or read in another tab — the bell
+ * refreshes, and anything new pops up as a toast that links to it. A slow poll
+ * and a refresh on returning to the tab remain as the fallback.
  */
 export function NotificationBell({ initial }: { initial: BellSummary }) {
   const router = useRouter();
@@ -35,20 +42,49 @@ export function NotificationBell({ initial }: { initial: BellSummary }) {
   const [, startTransition] = useTransition();
   const panel = useRef<HTMLDivElement>(null);
 
-  const refresh = useCallback(async () => {
-    try {
-      setSummary(await bellSummary());
-      setNow(Date.now());
-    } catch {
-      // a failed poll leaves the last good figure showing rather than a zero
-    }
-  }, []);
+  const toast = useToast();
+  const pathname = usePathname();
+  // ids already on screen, so only genuinely new arrivals are announced
+  const seen = useRef(new Set(initial.items.map((i) => i.id)));
+  const onInbox = useRef(false);
+  useEffect(() => {
+    onInbox.current = pathname.startsWith("/me/notifications");
+  }, [pathname]);
+
+  const refresh = useCallback(
+    async (announce = false) => {
+      try {
+        const next = await bellSummary();
+        if (announce) {
+          const fresh = next.items.filter((i) => !i.read && !seen.current.has(i.id));
+          for (const i of fresh.slice(0, 3).reverse()) {
+            toast({ title: i.title, body: i.body, href: i.href, tone: TOAST_TONE[i.severity as keyof typeof TOAST_TONE] ?? "info" });
+          }
+          if (onInbox.current) router.refresh();
+        }
+        for (const i of next.items) seen.current.add(i.id);
+        setSummary(next);
+        setNow(Date.now());
+      } catch {
+        // a failed refresh leaves the last good figure showing rather than a zero
+      }
+    },
+    [toast, router],
+  );
+
+  // the live stream; EventSource reconnects by itself after a drop
+  useEffect(() => {
+    if (typeof EventSource === "undefined") return;
+    const es = new EventSource("/api/notifications/stream");
+    es.addEventListener("changed", () => void refresh(true));
+    return () => es.close();
+  }, [refresh]);
 
   useEffect(() => {
     const timer = window.setInterval(() => {
-      if (document.visibilityState === "visible") void refresh();
+      if (document.visibilityState === "visible") void refresh(true);
     }, POLL_MS);
-    const onVisible = () => document.visibilityState === "visible" && void refresh();
+    const onVisible = () => document.visibilityState === "visible" && void refresh(true);
     document.addEventListener("visibilitychange", onVisible);
     return () => {
       window.clearInterval(timer);

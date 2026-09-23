@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
@@ -11,7 +13,8 @@ import { DecisionCard } from "./decision-card";
 
 export const metadata = { title: "Leave approvals" };
 
-export default async function ApprovalsPage() {
+export default async function ApprovalsPage({ searchParams }: PageProps<"/leave/approvals">) {
+  const params = await searchParams;
   const viewer = await requirePermission("leave.request.approve");
   const seesEverything = can(viewer, "leave.request.viewAll");
 
@@ -86,6 +89,7 @@ export default async function ApprovalsPage() {
     }
   }
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [12, 24, 48] });
   return (
     <>
       <PageHeader
@@ -105,8 +109,9 @@ export default async function ApprovalsPage() {
           />
         </Card>
       ) : (
+        <>
         <div className="grid gap-3 xl:grid-cols-2">
-          {rows.map((r) => (
+          {pagedRows.map((r) => (
             <DecisionCard
               key={r.requestId}
               request={{
@@ -118,6 +123,8 @@ export default async function ApprovalsPage() {
             />
           ))}
         </div>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="requests" sizes={[12, 24, 48]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

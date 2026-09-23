@@ -5,6 +5,7 @@ import { z } from "zod";
 import { db } from "@/db/client";
 import { auditLog } from "@/db/schema/core";
 import { can, requirePermission } from "@/lib/session";
+import { drainInBackground } from "@/kernel/events";
 import {
   DAY_KIND_LABEL,
   decideClaim,
@@ -45,6 +46,8 @@ export async function claimOvertimeAction(_prev: OvertimeState, formData: FormDa
     const c = await submitClaim({ orgId: viewer.orgId, employeeId: viewer.employeeId, date, minutes, reason });
     await audit(viewer, "create", c.id, `Claimed ${minutes} min overtime for ${date} (${c.reference})`);
     revalidatePath("/attendance/overtime");
+    // deliver the notification now rather than on the next cron sweep
+    drainInBackground(viewer.orgId);
     return { ok: `${c.reference} sent for approval.`, at: Date.now() };
   } catch (error) {
     return fail(error);
@@ -59,6 +62,8 @@ export async function withdrawOvertimeAction(_prev: OvertimeState, formData: For
     const ref = await withdrawClaim(viewer.orgId, viewer.employeeId, id);
     await audit(viewer, "cancel", id, `Withdrew ${ref}`);
     revalidatePath("/attendance/overtime");
+    // deliver the notification now rather than on the next cron sweep
+    drainInBackground(viewer.orgId);
     return { ok: "Withdrawn.", at: Date.now() };
   } catch (error) {
     return fail(error);
@@ -82,6 +87,8 @@ export async function decideOvertimeAction(_prev: OvertimeState, formData: FormD
     });
     await audit(viewer, decision === "approved" ? "approve" : "reject", id, `${decision === "approved" ? "Approved" : "Rejected"} ${r.reference}${note ? ` — ${note}` : ""}`);
     revalidatePath("/attendance/overtime");
+    // deliver the notification now rather than on the next cron sweep
+    drainInBackground(viewer.orgId);
     return { ok: decision === "approved" ? `${r.reference} approved.` : `${r.reference} rejected.`, at: Date.now() };
   } catch (error) {
     return fail(error);
@@ -105,6 +112,8 @@ export async function saveRuleAction(_prev: OvertimeState, formData: FormData): 
     );
     await audit(viewer, "update", kind, `Overtime rule for ${DAY_KIND_LABEL[kind].toLowerCase()}: ${formData.get("multiplier")}×`);
     revalidatePath("/attendance/overtime");
+    // deliver the notification now rather than on the next cron sweep
+    drainInBackground(viewer.orgId);
     return { ok: "Saved. New claims use this rate; decided ones keep theirs.", at: Date.now() };
   } catch (error) {
     return fail(error);

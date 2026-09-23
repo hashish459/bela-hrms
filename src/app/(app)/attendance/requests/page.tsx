@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import { and, eq, gte, lte } from "drizzle-orm";
 import { db } from "@/db/client";
 import { attendanceDays, shifts } from "@/db/schema/attendance";
@@ -26,7 +28,8 @@ import { RequestForm } from "./request-form";
 
 export const metadata = { title: "Attendance requests" };
 
-export default async function AttendanceRequestsPage() {
+export default async function AttendanceRequestsPage({ searchParams }: PageProps<"/attendance/requests">) {
+  const params = await searchParams;
   const viewer = await requirePermission("attendance.request.create");
 
   if (!viewer.employeeId) {
@@ -103,6 +106,7 @@ export default async function AttendanceRequestsPage() {
     }
   }
 
+  const { items: pagedRequests, page: pagedRequestsPage } = pageOf(requests, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -157,6 +161,7 @@ export default async function AttendanceRequestsPage() {
         {requests.length === 0 ? (
           <EmptyState title="No corrections raised yet" />
         ) : (
+        <>
           <TableShell>
             <thead>
               <tr>
@@ -170,7 +175,7 @@ export default async function AttendanceRequestsPage() {
               </tr>
             </thead>
             <tbody>
-              {requests.map((r) => (
+              {pagedRequests.map((r) => (
                 <Tr key={r.id}>
                   <Td className="font-mono text-xs text-ink-soft">{r.reference}</Td>
                   <Td className="tabular text-ink-soft">{r.dateBs}</Td>
@@ -194,6 +199,8 @@ export default async function AttendanceRequestsPage() {
               ))}
             </tbody>
           </TableShell>
+      <OffsetPagination page={pagedRequestsPage} params={params} param="page" label="requests" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
         )}
       </Card>
     </>

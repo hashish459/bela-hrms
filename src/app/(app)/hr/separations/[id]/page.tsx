@@ -5,6 +5,7 @@ import { ReportActions } from "@/components/reports/report-actions";
 import { requirePermission } from "@/lib/session";
 import { adToBs, daysBetween, formatBs, todayInNepal } from "@/lib/bs";
 import { Avatar } from "@/components/avatar";
+import { ZoomablePhoto } from "@/components/photo-viewer";
 import { Badge, Card, CardHeader } from "@/components/ui";
 import { separationDetail, SEPARATION_LABEL } from "@/modules/people/separations";
 import { CaseForm, Checklist, CloseCase } from "./case-panels";
@@ -35,13 +36,15 @@ export default async function SeparationCasePage({ params }: PageProps<"/hr/sepa
       </Link>
 
       <Card className="mb-4 flex flex-wrap items-center gap-4 p-4">
-        <Avatar
-          photoId={detail.photoFileId}
-          firstName={detail.employeeName.split(" ")[0] ?? "?"}
-          lastName={detail.employeeName.split(" ").slice(-1)[0] ?? ""}
-          seed={s.employeeId}
-          size="lg"
-        />
+        <ZoomablePhoto src={detail.photoFileId ? `/api/files/${detail.photoFileId}` : null} name={detail.employeeName}>
+          <Avatar
+            photoId={detail.photoFileId}
+            firstName={detail.employeeName.split(" ")[0] ?? "?"}
+            lastName={detail.employeeName.split(" ").slice(-1)[0] ?? ""}
+            seed={s.employeeId}
+            size="lg"
+          />
+        </ZoomablePhoto>
         <div className="min-w-0 flex-1">
           <div className="flex flex-wrap items-center gap-2">
             <h1 className="text-lg font-semibold text-ink">{detail.employeeName}</h1>

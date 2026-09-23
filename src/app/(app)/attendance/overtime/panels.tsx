@@ -13,6 +13,7 @@ import {
   type OvertimeState,
 } from "./actions";
 import { hm } from "./format";
+import { useConfirmSubmit, useToastedAction } from "@/components/feedback";
 
 const initial: OvertimeState = {};
 
@@ -40,7 +41,7 @@ function DurationInput({ max, defaultMinutes, error }: { max: number; defaultMin
       <span className="flex items-center gap-2">
         <Input name="hours" type="number" min={0} max={Math.floor(max / 60)} defaultValue={Math.floor(defaultMinutes / 60)} className="tabular w-20" aria-label="Hours" />
         <span className="text-xs text-ink-faint">h</span>
-        <Input name="minutes" type="number" min={0} max={59} step={5} defaultValue={defaultMinutes % 60} className="tabular w-20" aria-label="Minutes" />
+        <Input name="minutes" type="number" min={0} max={59} step={1} defaultValue={defaultMinutes % 60} className="tabular w-20" aria-label="Minutes" />
         <span className="text-xs text-ink-faint">m</span>
       </span>
     </Field>
@@ -109,7 +110,7 @@ function ClaimDrawer({
   onClose: () => void;
   onDone: (m: string) => void;
 }) {
-  const [state, action, pending] = useActionState(claimOvertimeAction, initial);
+  const [state, action, pending] = useActionState(useToastedAction(claimOvertimeAction), initial);
   useEffect(() => {
     if (state.at && state.ok) onDone(state.ok);
   }, [state.at, state.ok, onDone]);
@@ -162,10 +163,11 @@ function ClaimDrawer({
 }
 
 export function WithdrawClaim({ id }: { id: string }) {
-  const [state, action, pending] = useActionState(withdrawOvertimeAction, initial);
+  const [state, action, pending] = useActionState(useToastedAction(withdrawOvertimeAction), initial);
+  const ask = useConfirmSubmit({ title: "Withdraw this overtime claim?", body: "It leaves your supervisor's queue. You can claim the day again while it is inside the claim window.", confirmLabel: "Withdraw claim", tone: "warning" });
   if (state.ok) return <span className="text-[11px] text-ink-faint">Withdrawn</span>;
   return (
-    <form action={action} onSubmit={(e) => !confirm("Withdraw this claim?") && e.preventDefault()}>
+    <form action={action} onSubmit={ask}>
       <input type="hidden" name="id" value={id} />
       <button type="submit" disabled={pending} className="text-[11px] text-ink-soft hover:text-danger hover:underline">
         Withdraw
@@ -176,7 +178,7 @@ export function WithdrawClaim({ id }: { id: string }) {
 }
 
 export function DecideClaim({ id, claimedMinutes }: { id: string; claimedMinutes: number }) {
-  const [state, action, pending] = useActionState(decideOvertimeAction, initial);
+  const [state, action, pending] = useActionState(useToastedAction(decideOvertimeAction), initial);
   const [mode, setMode] = useState<"idle" | "approve" | "reject">("idle");
   if (state.ok) return <Note state={state} />;
 
@@ -189,7 +191,7 @@ export function DecideClaim({ id, claimedMinutes }: { id: string; claimedMinutes
           <span className="flex items-center gap-1">
             <Input name="hours" type="number" min={0} defaultValue={Math.floor(claimedMinutes / 60)} className="tabular w-16" aria-label="Hours" />
             <span className="text-xs text-ink-faint">h</span>
-            <Input name="minutes" type="number" min={0} max={59} step={5} defaultValue={claimedMinutes % 60} className="tabular w-16" aria-label="Minutes" />
+            <Input name="minutes" type="number" min={0} max={59} step={1} defaultValue={claimedMinutes % 60} className="tabular w-16" aria-label="Minutes" />
             <span className="text-xs text-ink-faint">m</span>
           </span>
           <Input name="note" placeholder="Note (optional)" className="min-w-40 flex-1" maxLength={500} />
@@ -238,7 +240,7 @@ export function RuleForm({
   minMinutes: number;
   maxMinutes: number;
 }) {
-  const [state, action, pending] = useActionState(saveRuleAction, initial);
+  const [state, action, pending] = useActionState(useToastedAction(saveRuleAction), initial);
   return (
     <form key={`${multiplier}:${minMinutes}:${maxMinutes}`} action={action} className="flex flex-wrap items-end gap-3">
       <input type="hidden" name="dayKind" value={dayKind} />

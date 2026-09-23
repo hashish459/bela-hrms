@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { and, asc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -10,7 +12,8 @@ import { DeleteUserButton, NewUserForm, RoleAssigner, ToggleUserButton } from ".
 
 export const metadata = { title: "Users" };
 
-export default async function UsersPage() {
+export default async function UsersPage({ searchParams }: PageProps<"/admin/users">) {
+  const params = await searchParams;
   const viewer = await requirePermission("admin.user.view");
   const canManage = can(viewer, "admin.user.manage");
 
@@ -63,6 +66,7 @@ export default async function UsersPage() {
   const active = rows.filter((r) => r.isActive).length;
   const noRole = rows.filter((r) => r.roleIds.length === 0).length;
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -106,7 +110,7 @@ export default async function UsersPage() {
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => (
+            {pagedRows.map((r) => (
               <Tr key={r.id}>
                 <Td>
                   <span className="block font-medium text-ink">{r.name}</span>
@@ -180,6 +184,7 @@ export default async function UsersPage() {
             ))}
           </tbody>
         </TableShell>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="logins" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
 
         {canManage ? (
           <NewUserForm roles={roleRows} unlinkedEmployees={linkable} />

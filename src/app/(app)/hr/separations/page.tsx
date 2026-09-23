@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
@@ -53,6 +55,7 @@ export default async function SeparationsPage({ searchParams }: PageProps<"/hr/s
   const completedThisYear = all.filter((r) => r.status === "completed" && adToBs(r.lastWorkingDate).year === year).length;
   const bs = (d: string) => formatBs(adToBs(d));
 
+  const { items: pagedRows, page: pagedRowsPage } = pageOf(rows, params, { param: "page", sizeParam: "size", sizes: [25, 50, 100] });
   return (
     <>
       <PageHeader
@@ -88,6 +91,7 @@ export default async function SeparationsPage({ searchParams }: PageProps<"/hr/s
           <EmptyState title="No separations here" />
         </Card>
       ) : (
+        <>
         <TableShell>
           <thead>
             <tr>
@@ -102,7 +106,7 @@ export default async function SeparationsPage({ searchParams }: PageProps<"/hr/s
             </tr>
           </thead>
           <tbody>
-            {rows.map((r) => {
+            {pagedRows.map((r) => {
               const days = daysUntil(today, r.lastWorkingDate);
               return (
                 <Tr key={r.id}>
@@ -157,6 +161,8 @@ export default async function SeparationsPage({ searchParams }: PageProps<"/hr/s
             })}
           </tbody>
         </TableShell>
+      <OffsetPagination page={pagedRowsPage} params={params} param="page" label="cases" sizes={[25, 50, 100]} sizeParam="size" className="mt-3 rounded-md border border-line bg-surface" />
+        </>
       )}
     </>
   );

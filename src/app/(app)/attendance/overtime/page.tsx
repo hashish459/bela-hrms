@@ -1,3 +1,5 @@
+import { pageOf } from "@/lib/pagination";
+import { OffsetPagination } from "@/components/pagination";
 import Link from "next/link";
 import { Download, Hourglass, TimerReset, Wallet } from "lucide-react";
 import { can, requirePermission } from "@/lib/session";
@@ -78,9 +80,9 @@ export default async function OvertimePage({ searchParams }: PageProps<"/attenda
         ))}
       </nav>
 
-      {tab === "mine" && viewer.employeeId ? <Mine orgId={viewer.orgId} employeeId={viewer.employeeId} today={today} /> : null}
-      {tab === "approvals" && canApprove ? <Approvals rows={queue} seesAll={seesAll} /> : null}
-      {tab === "register" && seesAll ? <Register orgId={viewer.orgId} y={params.y} m={params.m} status={params.status} /> : null}
+      {tab === "mine" && viewer.employeeId ? <Mine orgId={viewer.orgId} employeeId={viewer.employeeId} today={today} params={params} /> : null}
+      {tab === "approvals" && canApprove ? <Approvals rows={queue} seesAll={seesAll} params={params} /> : null}
+      {tab === "register" && seesAll ? <Register orgId={viewer.orgId} y={params.y} m={params.m} status={params.status} params={params} /> : null}
       {tab === "rules" && canRules ? <Rules orgId={viewer.orgId} /> : null}
     </>
   );
@@ -88,7 +90,7 @@ export default async function OvertimePage({ searchParams }: PageProps<"/attenda
 
 const bsLabel = (iso: string) => formatBs(adToBs(iso));
 
-async function Mine({ orgId, employeeId, today }: { orgId: string; employeeId: string; today: string }) {
+async function Mine({ orgId, employeeId, today, params }: { orgId: string; employeeId: string; today: string; params: Params }) {
   const [eligible, claims] = await Promise.all([eligibleDays(orgId, employeeId, today), myClaims(orgId, employeeId)]);
   const month = adToBs(today);
   const inMonth = claims.filter((c) => {
@@ -150,15 +152,17 @@ async function Mine({ orgId, employeeId, today }: { orgId: string; employeeId: s
 
       <Card>
         <CardHeader title="My claims" description="Newest first" />
-        <ClaimTable rows={claims} showEmployee={false} withdraw />
+        <ClaimTable rows={claims} showEmployee={false} withdraw params={params} />
       </Card>
     </div>
   );
 }
 
-function ClaimTable({ rows, showEmployee, withdraw = false }: { rows: ClaimRow[]; showEmployee: boolean; withdraw?: boolean }) {
-  if (rows.length === 0) return <EmptyState title="No claims yet" />;
+function ClaimTable({ rows: all, showEmployee, withdraw = false, params }: { rows: ClaimRow[]; showEmployee: boolean; withdraw?: boolean; params: Params }) {
+  if (all.length === 0) return <EmptyState title="No claims yet" />;
+  const { items: rows, page } = pageOf(all, params, { sizes: [25, 50, 100] });
   return (
+    <>
     <TableShell className="rounded-none border-0">
       <thead>
         <tr>
@@ -206,11 +210,14 @@ function ClaimTable({ rows, showEmployee, withdraw = false }: { rows: ClaimRow[]
         ))}
       </tbody>
     </TableShell>
+    <OffsetPagination page={page} params={params} label="claims" sizes={[25, 50, 100]} />
+    </>
   );
 }
 
-function Approvals({ rows, seesAll }: { rows: ClaimRow[]; seesAll: boolean }) {
-  if (rows.length === 0) {
+function Approvals({ rows: all, seesAll, params }: { rows: ClaimRow[]; seesAll: boolean; params: Params }) {
+  const { items: rows, page } = pageOf(all, params, { sizes: [12, 24, 48] });
+  if (all.length === 0) {
     return (
       <Card>
         <EmptyState title="Nothing waiting" hint={seesAll ? "Every overtime claim in the organisation is decided." : "Claims from people who report to you appear here."} />
@@ -218,6 +225,7 @@ function Approvals({ rows, seesAll }: { rows: ClaimRow[]; seesAll: boolean }) {
     );
   }
   return (
+    <>
     <div className="grid gap-3 lg:grid-cols-2">
       {rows.map((c) => (
         <Card key={c.id} className="flex flex-col">
@@ -261,12 +269,15 @@ function Approvals({ rows, seesAll }: { rows: ClaimRow[]; seesAll: boolean }) {
         </Card>
       ))}
     </div>
+    <OffsetPagination page={page} params={params} label="claims" sizes={[12, 24, 48]} className="mt-3 rounded-md border border-line bg-surface" />
+    </>
   );
 }
 
 type Param = string | string[] | undefined;
+type Params = Record<string, Param>;
 
-async function Register({ orgId, y: yParam, m: mParam, status }: { orgId: string; y: Param; m: Param; status: Param }) {
+async function Register({ orgId, y: yParam, m: mParam, status, params }: { orgId: string; y: Param; m: Param; status: Param; params: Params }) {
   const today = adToBs(todayInNepal());
   const y = Number(typeof yParam === "string" ? yParam : NaN);
   const m = Number(typeof mParam === "string" ? mParam : NaN);
@@ -356,7 +367,7 @@ async function Register({ orgId, y: yParam, m: mParam, status }: { orgId: string
 
       <Card>
         <CardHeader title="Every claim" description={`${formatBsKey({ ...current, day: 1 }).slice(0, 7)} · ${st ?? "all statuses"}`} />
-        <ClaimTable rows={rows} showEmployee />
+        <ClaimTable rows={rows} showEmployee params={params} />
       </Card>
     </div>
   );

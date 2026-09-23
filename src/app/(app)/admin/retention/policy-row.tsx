@@ -5,6 +5,7 @@ import { Eraser, Loader2, Save, Wrench } from "lucide-react";
 import { Button } from "@/components/ui";
 import { cn } from "@/lib/utils";
 import { optimiseAction, purgeNowAction, savePolicyAction, type RetentionState } from "./actions";
+import { useConfirmSubmit } from "@/components/feedback";
 
 const initial: RetentionState = {};
 
@@ -42,6 +43,12 @@ export function PolicyRow({
 }) {
   const [state, save, saving] = useActionState(savePolicyAction, initial);
   const [purgeState, purge, purging] = useActionState(purgeNowAction, initial);
+  const askPurge = useConfirmSubmit({
+    title: `Permanently clear ${eligible.toLocaleString("en-IN")} rows?`,
+    body: "They are past their retention period. This cannot be undone — export first if you may need them.",
+    confirmLabel: "Clear permanently",
+    tone: "danger",
+  });
   const options = PRESETS.filter((d) => d >= minDays);
   if (retentionDays !== null && !options.includes(retentionDays)) options.push(retentionDays);
   options.sort((a, b) => a - b);
@@ -80,9 +87,7 @@ export function PolicyRow({
 
       <form
         action={purge}
-        onSubmit={(e) => {
-          if (!confirm(`Permanently clear ${eligible.toLocaleString("en-IN")} rows? This cannot be undone.`)) e.preventDefault();
-        }}
+        onSubmit={askPurge}
         className="flex flex-col items-end"
       >
         <input type="hidden" name="dataset" value={dataset} />
