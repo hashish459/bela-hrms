@@ -5,6 +5,7 @@ import { cookies, headers } from "next/headers";
 import { forbidden, redirect } from "next/navigation";
 import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
+import { explainSchemaDrift } from "@/db/errors";
 import { fiscalYears, organizations, roleGrants, roles, userAccounts, userRoles } from "@/db/schema/core";
 import { employees, liveEmployee } from "@/db/schema/hr";
 import { cached, cacheTags } from "@/kernel/cache";
@@ -152,6 +153,8 @@ function loadAuthz(userId: string) {
   return cached(
     `authz:user:${userId}`,
     async () => {
+      // The first query of every request, so the one that meets an unmigrated
+      // database first: say what is wrong instead of printing the SQL.
       const [account] = await db
         .select({
           orgId: userAccounts.orgId,
@@ -164,7 +167,8 @@ function loadAuthz(userId: string) {
         .from(userAccounts)
         .innerJoin(organizations, eq(organizations.id, userAccounts.orgId))
         .where(and(eq(userAccounts.userId, userId), isNull(userAccounts.deletedAt)))
-        .limit(1);
+        .limit(1)
+        .catch(explainSchemaDrift);
 
       if (!account || !account.isActive) return null;
 
