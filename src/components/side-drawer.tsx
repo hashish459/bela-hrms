@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, type ReactNode } from "react";
+import { useEffect, useRef, type FormEvent, type ReactNode } from "react";
 import { X } from "lucide-react";
 
 /**
@@ -15,6 +15,7 @@ export function SideDrawer({
   children,
   footer,
   action,
+  onSubmit,
   width = "max-w-lg",
 }: {
   title: string;
@@ -24,6 +25,8 @@ export function SideDrawer({
   footer?: ReactNode;
   /** When set, the panel is a <form> posting to this action. */
   action?: (formData: FormData) => void;
+  /** Runs before the action — e.g. a confirmation that may hold the submit. */
+  onSubmit?: (e: FormEvent<HTMLFormElement>) => void;
   width?: string;
 }) {
   const panel = useRef<HTMLDivElement>(null);
@@ -63,7 +66,7 @@ export function SideDrawer({
       <button type="button" aria-label="Close" onClick={onClose} className="absolute inset-0 bg-ink/30" />
       <div ref={panel}>
         {action ? (
-          <form action={action} className={className}>
+          <form action={action} onSubmit={onSubmit} className={className}>
             {body}
           </form>
         ) : (

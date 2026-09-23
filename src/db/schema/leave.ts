@@ -175,6 +175,68 @@ export const leaveBalances = pgTable(
   ],
 );
 
+export const balanceAdjustmentKind = pgEnum("leave_balance_adjustment_kind", [
+  "allocation",
+  "adjustment",
+  "carry_forward",
+  "lapse",
+  "encashment",
+  "encashment_reversal",
+]);
+
+/**
+ * Every change made to a balance other than by a leave request — allocation,
+ * a manual correction, the year-end carry and lapse, an encashment — as an
+ * append-only ledger. The balance row holds the current figures; this says
+ * how it got there and who did it, which is what an auditor asks.
+ *
+ * `days` is signed and applies to `field`. `dedupeKey` makes a batch (the
+ * year-end run, an allocation) safe to repeat: a second run inserts nothing.
+ */
+export const leaveBalanceAdjustments = pgTable(
+  "leave_balance_adjustments",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    balanceId: uuid("balance_id")
+      .notNull()
+      .references(() => leaveBalances.id, { onDelete: "cascade" }),
+    employeeId: uuid("employee_id")
+      .notNull()
+      .references(() => employees.id, { onDelete: "cascade" }),
+    leaveTypeId: uuid("leave_type_id")
+      .notNull()
+      .references(() => leaveTypes.id, { onDelete: "cascade" }),
+    fiscalYearId: uuid("fiscal_year_id")
+      .notNull()
+      .references(() => fiscalYears.id, { onDelete: "cascade" }),
+    kind: balanceAdjustmentKind("kind").notNull(),
+    /** "entitled" or "carried_forward" — which figure moved. */
+    field: text("field").notNull(),
+    days: numeric("days", { precision: 6, scale: 2 }).notNull(),
+    before: numeric("before", { precision: 6, scale: 2 }).notNull(),
+    after: numeric("after", { precision: 6, scale: 2 }).notNull(),
+    reason: text("reason"),
+    /** Human reference for encashments, e.g. ENC-2083-0003. */
+    reference: text("reference"),
+    /** For an encashment reversal: the encashment it undoes. */
+    reversesId: uuid("reverses_id"),
+    reversedAt: timestamp("reversed_at"),
+    dedupeKey: text("dedupe_key"),
+    byUserId: text("by_user_id"),
+    byLabel: text("by_label"),
+    createdAt: timestamp("created_at").notNull().defaultNow(),
+  },
+  (t) => [
+    unique("leave_balance_adjustments_dedupe_key").on(t.orgId, t.dedupeKey),
+    index("leave_balance_adjustments_balance_idx").on(t.balanceId, t.createdAt),
+    index("leave_balance_adjustments_org_kind_idx").on(t.orgId, t.kind, t.createdAt),
+    index("leave_balance_adjustments_employee_idx").on(t.employeeId, t.createdAt),
+  ],
+);
+
 export const dayPortion = pgEnum("day_portion", ["full", "first_half", "second_half"]);
 
 export const leaveRequests = pgTable(
