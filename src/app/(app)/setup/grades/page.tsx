@@ -1,37 +1,41 @@
 import { asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
-import { designations } from "@/db/schema/org";
+import { grades } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
+import { formatNpr } from "@/lib/utils";
 import { usageFor } from "@/modules/org/masters";
 import { PageHeader } from "@/components/ui";
 import { MasterEditor, type EditorRow, type FieldDef } from "../master-editor";
 import { ActiveBadge, deactivateBlockedReason, deleteBlockedReason } from "../page-parts";
 
-export const metadata = { title: "Designations" };
+export const metadata = { title: "Grades" };
 
-export default async function DesignationsPage() {
+export default async function GradesPage() {
   const viewer = await requirePermission("setup.structure.view");
   const [rows, usage] = await Promise.all([
-    db
-      .select()
-      .from(designations)
-      .where(eq(designations.orgId, viewer.orgId))
-      .orderBy(asc(designations.hierarchyLevel), asc(designations.code)),
-    usageFor(viewer.orgId, "designation"),
+    db.select().from(grades).where(eq(grades.orgId, viewer.orgId)).orderBy(asc(grades.hierarchyLevel), asc(grades.code)),
+    usageFor(viewer.orgId, "grade"),
   ]);
 
   const fields: FieldDef[] = [
-    { name: "code", label: "Code", kind: "text", required: true, maxLength: 20, mono: true, placeholder: "SO" },
-    { name: "name", label: "Title", kind: "text", required: true, maxLength: 120, placeholder: "Senior Officer" },
-    { name: "nameNepali", label: "Title (Nepali)", kind: "text", maxLength: 120 },
+    { name: "code", label: "Code", kind: "text", required: true, maxLength: 20, mono: true, placeholder: "L4" },
+    { name: "name", label: "Name", kind: "text", required: true, maxLength: 120, placeholder: "Level 4 — Officer" },
     {
       name: "hierarchyLevel",
-      label: "Seniority",
+      label: "Order",
       kind: "number",
       required: true,
       min: 1,
       max: 999,
-      hint: "1 is the most senior. Orders the list and seniority reports.",
+      hint: "1 is the most senior grade.",
+    },
+    {
+      name: "basicSalary",
+      label: "Basic salary (NPR)",
+      kind: "number",
+      min: 0,
+      step: "0.01",
+      hint: "Monthly. The starting point payroll proposes for somebody placed in this grade.",
     },
   ];
 
@@ -41,15 +45,20 @@ export default async function DesignationsPage() {
       id: r.id,
       code: r.code,
       isActive: r.isActive,
-      search: [r.code, r.name, r.nameNepali].filter(Boolean).join(" ").toLowerCase(),
+      search: [r.code, r.name].join(" ").toLowerCase(),
       deleteBlocked: deleteBlockedReason(u),
       deactivateBlocked: deactivateBlockedReason(u?.staff ?? 0),
-      values: { code: r.code, name: r.name, nameNepali: r.nameNepali, hierarchyLevel: r.hierarchyLevel },
+      values: {
+        code: r.code,
+        name: r.name,
+        hierarchyLevel: r.hierarchyLevel,
+        basicSalary: r.basicSalary === null ? null : Number(r.basicSalary),
+      },
       cells: [
         <span key="c" className="font-mono text-xs text-ink-soft">{r.code}</span>,
         <span key="n" className="font-medium text-ink">{r.name}</span>,
-        <span key="np" className="text-ink-soft">{r.nameNepali ?? "—"}</span>,
         <span key="l" className="tabular text-ink-soft">{r.hierarchyLevel}</span>,
+        <span key="b" className="tabular">{r.basicSalary === null ? "—" : formatNpr(r.basicSalary)}</span>,
         <span key="s" className="tabular">{u?.staff ?? 0}</span>,
         <ActiveBadge key="a" active={r.isActive} />,
       ],
@@ -58,21 +67,18 @@ export default async function DesignationsPage() {
 
   return (
     <>
-      <PageHeader
-        title="Designations"
-        description="Ranks, most senior first. Staff counts are people employed today."
-      />
+      <PageHeader title="Grades" description="Pay grades and the basic salary each one starts at, most senior first." />
       <MasterEditor
-        kind="designation"
-        noun="designation"
-        plural="designations"
-        path="/setup/designations"
+        kind="grade"
+        noun="grade"
+        plural="grades"
+        path="/setup/grades"
         canManage={can(viewer, "setup.structure.manage")}
         columns={[
           { header: "Code" },
-          { header: "Title" },
-          { header: "Nepali" },
-          { header: "Seniority", align: "right" },
+          { header: "Grade" },
+          { header: "Order", align: "right" },
+          { header: "Basic salary", align: "right" },
           { header: "Staff", align: "right" },
           { header: "Status" },
         ]}

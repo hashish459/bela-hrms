@@ -32,10 +32,16 @@ export function ReportToolbar({
   today,
   departments,
   branches,
+  clipsToToday = true,
 }: {
   today: string;
   departments: Option[];
   branches: Option[];
+  /**
+   * Whether figures stop at today. Attendance does — a future day has no
+   * punches. Leave does not: leave approved for next week is already a fact.
+   */
+  clipsToToday?: boolean;
 }) {
   const router = useRouter();
   const pathname = usePathname();
@@ -233,10 +239,11 @@ export function ReportToolbar({
           ·
         </span>
         {period.from === period.to ? period.from : `${period.from} → ${period.to}`}
-        {period.effectiveTo < period.to && period.hasElapsed ? (
+        {clipsToToday && period.effectiveTo < period.to && period.hasElapsed ? (
           <> · counted to {safeBs(period.effectiveTo)} (today)</>
         ) : null}
-        {!period.hasElapsed ? <> · this period has not started yet</> : null}
+        {!clipsToToday && period.to > today ? <> · includes leave already booked after today</> : null}
+        {clipsToToday && !period.hasElapsed ? <> · this period has not started yet</> : null}
         {period.truncated ? <> · shortened to the most recent year</> : null}
       </p>
     </div>

@@ -1,12 +1,12 @@
 import "server-only";
 
-import { and, asc, eq, gte, ilike, inArray, isNull, lte, or, sql } from "drizzle-orm";
+import { and, eq, gte, inArray, lte } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
-import { branches, departments, designations } from "@/db/schema/org";
 import { attendanceDays, shifts } from "@/db/schema/attendance";
-import { addDays, adToBs, BS_MONTHS, formatBsKey, todayInNepal, weekdayOf } from "@/lib/bs";
+import { addDays, adToBs, formatBsKey, todayInNepal, weekdayOf } from "@/lib/bs";
+import { bucketDates, ratio, type Granularity } from "@/lib/reports/buckets";
 import type { ReportFilters, ReportPeriod } from "@/lib/reports/period";
+import { employeesInScope } from "@/lib/reports/scope";
 import { holidayMap, leaveMap } from "./index";
 import { toMinutes, type AttendanceStatus } from "./calc";
 
@@ -192,7 +192,7 @@ export type AttendanceReport = {
   departments: DepartmentReportRow[];
   daily: DailyPoint[];
   trend: TrendBucket[];
-  trendGranularity: "day" | "week" | "month";
+  trendGranularity: Granularity;
   /** Every late arrival in the period, latest first. */
   lateInstances: DayInstance[];
   /** Missing punches and unrecorded working days, excluding today. */
@@ -238,10 +238,6 @@ function emptyMetrics(): AttendanceMetrics {
     absenteeismRate: null,
     punctualityRate: null,
   };
-}
-
-function ratio(part: number, whole: number): number | null {
-  return whole > 0 ? part / whole : null;
 }
 
 /** Derives the day totals and rates from the raw counts. Mutates and returns. */
@@ -320,51 +316,7 @@ export async function buildAttendanceReport(
   };
   if (!period.hasElapsed) return empty;
 
-  /*
-   * Who is in scope: anybody employed for at least one day of the period.
-   * That includes people who have since left — a report on Shrawan has to show
-   * the person who resigned in Bhadra, or Shrawan's absence total changes
-   * depending on when you run it.
-   */
-  const like = filters.q ? `%${filters.q.replace(/[\\%_]/g, (ch) => `\\${ch}`)}%` : null;
-  const staff = await db
-    .select({
-      id: employees.id,
-      code: employees.employeeCode,
-      name: sql<string>`${employees.firstName} || ' ' || ${employees.lastName}`,
-      dateOfJoin: employees.dateOfJoin,
-      separationDate: employees.separationDate,
-      departmentId: employees.departmentId,
-      department: departments.name,
-      branchId: employees.branchId,
-      branch: branches.name,
-      designation: designations.name,
-    })
-    .from(employees)
-    .leftJoin(departments, eq(departments.id, employees.departmentId))
-    .leftJoin(branches, eq(branches.id, employees.branchId))
-    .leftJoin(designations, eq(designations.id, employees.designationId))
-    .where(
-      and(
-        eq(employees.orgId, orgId),
-        lte(employees.dateOfJoin, to),
-        or(isNull(employees.separationDate), gte(employees.separationDate, from)),
-        or(
-          inArray(employees.status, [...EMPLOYED_STATUSES]),
-          gte(employees.separationDate, from),
-        ),
-        filters.departmentId ? eq(employees.departmentId, filters.departmentId) : undefined,
-        filters.branchId ? eq(employees.branchId, filters.branchId) : undefined,
-        like
-          ? or(
-              ilike(employees.employeeCode, like),
-              ilike(sql`${employees.firstName} || ' ' || ${employees.lastName}`, like),
-            )
-          : undefined,
-      ),
-    )
-    .orderBy(asc(employees.employeeCode));
-
+  const staff = await employeesInScope(orgId, from, to, filters);
   if (staff.length === 0) return empty;
   const staffIds = staff.map((s) => s.id);
 
@@ -624,43 +576,12 @@ export async function buildAttendanceReport(
   };
 }
 
-/**
- * Axis abbreviations. Not a three-letter slice: Ashadh and Ashwin would both
- * read "Ash", and a 90-day trend spans both of them.
- */
-const BS_MONTH_SHORT = ["Bai", "Jes", "Asr", "Shr", "Bha", "Asw", "Kar", "Man", "Pou", "Mag", "Fal", "Cha"];
+/** Groups the daily points into the shared day / week / BS-month buckets. */
+function bucketTrend(daily: DailyPoint[]): { trend: TrendBucket[]; granularity: Granularity } {
+  const { granularity, buckets } = bucketDates(daily.map((p) => p.date));
 
-/**
- * Groups the daily points so a trend chart stays readable: a column per day up
- * to two months, a column per week up to about four, then one per BS month.
- */
-function bucketTrend(daily: DailyPoint[]): {
-  trend: TrendBucket[];
-  granularity: "day" | "week" | "month";
-} {
-  const granularity = daily.length <= 62 ? "day" : daily.length <= 126 ? "week" : "month";
-
-  const groups: DailyPoint[][] = [];
-  if (granularity === "day") {
-    for (const p of daily) groups.push([p]);
-  } else if (granularity === "week") {
-    for (let i = 0; i < daily.length; i += 7) groups.push(daily.slice(i, i + 7));
-  } else {
-    let current: DailyPoint[] = [];
-    let key = "";
-    for (const p of daily) {
-      const k = p.dateBs.slice(0, 7);
-      if (k !== key && current.length) {
-        groups.push(current);
-        current = [];
-      }
-      key = k;
-      current.push(p);
-    }
-    if (current.length) groups.push(current);
-  }
-
-  const trend = groups.map((g) => {
+  const trend = buckets.map((b) => {
+    const g = b.indexes.map((i) => daily[i]);
     const counts = emptyCounts();
     let lateCount = 0;
     let otMinutes = 0;
@@ -670,26 +591,12 @@ function bucketTrend(daily: DailyPoint[]): {
       otMinutes += p.otMinutes;
     }
     const expected = counts.present + counts.field_work + counts.half_day + counts.absent + counts.missing_punch;
-    const firstBs = adToBs(g[0].date);
-
-    let label: string;
-    let sublabel: string;
-    if (granularity === "day") {
-      label = String(firstBs.day);
-      sublabel = g[0].date;
-    } else if (granularity === "week") {
-      label = `${firstBs.day} ${BS_MONTH_SHORT[firstBs.month - 1]}`;
-      sublabel = `${g[0].date} – ${g[g.length - 1].date}`;
-    } else {
-      label = BS_MONTH_SHORT[firstBs.month - 1];
-      sublabel = `${BS_MONTHS[firstBs.month - 1]} ${firstBs.year}`;
-    }
 
     return {
-      label,
-      sublabel,
-      from: g[0].date,
-      to: g[g.length - 1].date,
+      label: b.label,
+      sublabel: b.sublabel,
+      from: b.from,
+      to: b.to,
       isOff: g.every((p) => p.isWeeklyOff || p.holidayName !== null),
       counts,
       lateCount,
@@ -703,10 +610,7 @@ function bucketTrend(daily: DailyPoint[]): {
 
 /* -------------------------------------------------------------- formatting */
 
-/** "92.4%", or "—" when there is nothing to divide by. */
-export function formatRate(rate: number | null, digits = 1): string {
-  return rate === null ? "—" : `${(rate * 100).toFixed(digits)}%`;
-}
+export { formatDayCount, formatRate } from "@/lib/reports/buckets";
 
 /** Minutes as decimal hours, the unit payroll works in: "12.5". */
 export function formatHours(minutes: number): string {
@@ -718,11 +622,6 @@ export function formatClock(minutes: number | null): string {
   if (minutes === null) return "—";
   const m = ((minutes % 1440) + 1440) % 1440;
   return `${String(Math.floor(m / 60)).padStart(2, "0")}:${String(m % 60).padStart(2, "0")}`;
-}
-
-/** Half days make fractional totals; show them without a trailing ".0". */
-export function formatDayCount(value: number): string {
-  return Number.isInteger(value) ? String(value) : value.toFixed(1);
 }
 
 /**
