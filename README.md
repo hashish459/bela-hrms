@@ -60,7 +60,7 @@ CREATE DATABASE bela_hrms ENCODING 'UTF8' LC_COLLATE 'C' LC_CTYPE 'C' TEMPLATE t
 | **Inventory** | planned | Items, groups, stores, requests, issue and return, stock ledger |
 | **Fixed Assets** | planned | Register, groups, allocation, maintenance, depreciation, disposal |
 | **Organisation** | 14 of 14 built | Company Profile, Branches, Departments & sections, Designations, Grades, Employment Types, Divisions, Business Units, Sub Business Units, Functional Categories, Projects, Locations, Fiscal Years, Holidays — every master editable (add, edit, deactivate, reactivate, delete when unreferenced), audited field by field |
-| **Administration** | 7 of 7 built | Users (create, disable, delete), Roles, Audit Trail, Modules, Recycle Bin (restore or purge anything deleted), Appearance, Notifications (rules per event — on/off, in-app and email channels, recipients, thresholds, wording with live preview and test send; announcements to everyone, a branch, department or role; delivery log and email outbox; volume overview) |
+| **Administration** | 8 of 8 built | Users (create, disable, delete), Roles, Audit Trail, Modules, Data Retention (how long audit entries, notifications, email, events and raw punches are kept; clear automatically or now; database health), Recycle Bin (restore or purge anything deleted), Appearance, Notifications (rules per event — on/off, in-app and email channels, recipients, thresholds, wording with live preview and test send; announcements to everyone, a branch, department or role; delivery log and email outbox; volume overview) |
 | **Documentation** | 7 of 7 built | Getting Started, User Manual, FAQ, Architecture, Data Model, Workflows, Roadmap |
 
 A planned screen is a real route. It renders what it will do, which permission guards
@@ -509,6 +509,36 @@ and wait in **Administration › Recycle Bin** to be restored exactly as they we
 - **Deleting an employee is for duplicates.** It is refused while people report to them or
   a request waits on them, and closes their login in the same transaction. Somebody leaving
   is a separation, which keeps them on file.
+
+## Data retention
+
+**Administration › Data Retention** decides how long *operational* data is kept — the
+records that pile up and are never read again — and clears what has outlived its use.
+Business records (leave, attendance days, employee files, approvals, payroll inputs) are
+not on the list at all, however old.
+
+| Dataset | Default | Minimum | Cleared by default |
+|---|---|---|---|
+| Read & archived notifications (and their email copies) | 90 days | 14 | automatically |
+| All notifications | 1 year | 60 | automatically |
+| Email outbox (sent, logged, skipped, failed — never queued) | 60 days | 7 | automatically |
+| Delivered system events (failed ones kept) | 30 days | 7 | automatically |
+| Announcements | 1 year | 30 | on demand |
+| Audit trail | 2 years | 180 | on demand — with **Export first** to CSV |
+| Raw device punches already applied to a day | forever | 400 | on demand |
+| Recycle bin (items deleted longer ago than this) | forever | 7 | on demand |
+
+- **Floors** are enforced on the server, so no setting can erase last week's audit trail.
+- **Batches**: rows go in chunks of 2,000 with a time budget per run, so clearing a million
+  rows never holds one long lock on a table the app is writing to.
+- **A trace**: every clear writes an audit entry ("Purged 25 read & archived notifications
+  older than 90 days"), including the ones the scheduler makes.
+- **Daily**, from the cron endpoint, each automatic dataset runs at most once in twenty hours
+  whatever the cron interval. The recycle bin honours each module's purge rules — an
+  employee with history is skipped, not deleted.
+- **Database health** shows the largest tables, their dead rows and last vacuum.
+  *Optimise tables* runs `VACUUM (ANALYZE)` on the purge-heavy tables and `ANALYZE`
+  everywhere — plain VACUUM, never FULL, which would lock the table.
 
 ## Performance, caching and database hardening
 

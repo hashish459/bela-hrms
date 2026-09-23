@@ -315,3 +315,30 @@ export const userAccountsRelations = relations(userAccounts, ({ one }) => ({
     references: [organizations.id],
   }),
 }));
+
+/**
+ * How long each kind of operational data is kept, per organisation.
+ *
+ * A row here is an override of the default in `lib/retention.ts`; no row means
+ * the default applies. `retentionDays = null` keeps the data forever. The
+ * service enforces a floor per dataset, so nobody can set the audit trail to
+ * a day and erase what just happened.
+ */
+export const retentionPolicies = pgTable(
+  "retention_policies",
+  {
+    id: uuid("id").primaryKey().defaultRandom(),
+    orgId: uuid("org_id")
+      .notNull()
+      .references(() => organizations.id, { onDelete: "cascade" }),
+    dataset: text("dataset").notNull(),
+    retentionDays: integer("retention_days"),
+    /** Purged automatically by the daily run; off means only "Purge now". */
+    isAutomatic: boolean("is_automatic").notNull().default(false),
+    lastRunAt: timestamp("last_run_at"),
+    lastPurged: integer("last_purged"),
+    updatedByLabel: text("updated_by_label"),
+    updatedAt: timestamp("updated_at").notNull().defaultNow(),
+  },
+  (t) => [unique("retention_policies_org_dataset_key").on(t.orgId, t.dataset)],
+);

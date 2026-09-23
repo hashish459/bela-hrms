@@ -495,6 +495,7 @@ export const MODULES: ModuleDefinition[] = [
       { key: "admin.settings.manage", label: "Manage system settings" },
       { key: "admin.notifications.manage", label: "Manage notifications and send announcements" },
       { key: "admin.recycle.manage", label: "Restore or permanently purge deleted records" },
+      { key: "admin.retention.manage", label: "Set data retention and clear old operational data" },
       { key: "admin.settings.appearance", label: "Change own appearance settings" },
     ],
     nav: [
@@ -507,6 +508,8 @@ export const MODULES: ModuleDefinition[] = [
         "Theme, typeface, text size, density and accent — personal to each person and their browser."),
       ready("admin.notifications", "Notifications", "/admin/notifications", "BellRing", "admin.notifications.manage", "Oversight",
         "Which events notify whom, by which channel and in what words; announcements; and the delivery log."),
+      ready("admin.retention", "Data Retention", "/admin/retention", "DatabaseZap", "admin.retention.manage", "Oversight",
+        "How long audit entries, notifications, email, events and raw punches are kept — cleared automatically or on demand."),
       ready("admin.recycle-bin", "Recycle Bin", "/admin/recycle-bin", "Trash2", "admin.recycle.manage", "Oversight",
         "Everything deleted across the system — logins, employee records, masters, file entries — to restore or purge."),
     ],

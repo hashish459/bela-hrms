@@ -3,7 +3,7 @@ import { requirePermission } from "@/lib/session";
 import { adToBs, formatBs } from "@/lib/bs";
 import { cn } from "@/lib/utils";
 import { Badge, Card, EmptyState, PageHeader, TableShell, Td, Th, Tr } from "@/components/ui";
-import { BIN_TYPES, binCounts, listBin, type BinType } from "./bin";
+import { BIN_TYPES, binCounts, listBin, type BinType } from "@/lib/recycle-bin";
 import { BinRowActions } from "./bin-row";
 
 export const metadata = { title: "Recycle Bin" };

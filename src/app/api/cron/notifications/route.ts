@@ -8,13 +8,15 @@ import { organizations } from "@/db/schema/core";
 import { domainEvents } from "@/db/schema/kernel";
 import { drain } from "@/kernel/events";
 import { applyDueMovements } from "@/modules/people/movements";
+import { dailyRetention } from "@/lib/retention";
 import { flushEmail } from "@/modules/notifications/email";
 import { sweepReminders } from "@/modules/notifications/service";
 
 /**
  * The scheduler's entry point: apply transfers and promotions whose date has
  * come, drain the event queue, send due reminders for every organisation,
- * empty the email outbox, and keep the housekeeping tables small.
+ * empty the email outbox, keep the housekeeping tables small, and apply each
+ * organisation's data-retention policies (Administration › Data Retention).
  *
  * Point a cron job (or any scheduler) at it every few minutes:
  *
@@ -47,8 +49,11 @@ async function run(request: Request) {
   for (const org of orgs) reminders += await sweepReminders(org.id, { force: true });
   const email = await flushEmail(200);
   const housekeeping = await tidy();
+  // each organisation's retention policies, at most once a day per dataset
+  let retained = 0;
+  for (const org of orgs) retained += (await dailyRetention(org.id)).reduce((sum, r) => sum + r.purged, 0);
 
-  return Response.json({ movements, events, reminders, email, housekeeping });
+  return Response.json({ movements, events, reminders, email, housekeeping, retention: retained });
 }
 
 /**

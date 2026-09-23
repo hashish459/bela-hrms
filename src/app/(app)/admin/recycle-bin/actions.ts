@@ -8,7 +8,7 @@ import { requirePermission } from "@/lib/session";
 import { MasterError } from "@/modules/org/masters";
 import { StructureError } from "@/modules/org/structure";
 import { RecordError } from "@/modules/people/records";
-import { BIN_TYPES, purgeItem, restoreItem, type BinType } from "./bin";
+import { BIN_TYPES, purgeItem, restoreItem, type BinType } from "@/lib/recycle-bin";
 
 export type BinState = { ok?: string; error?: string; at?: number };
 
