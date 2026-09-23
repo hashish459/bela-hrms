@@ -1,4 +1,4 @@
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
 import { employeeDocuments } from "@/db/schema/selfservice";
@@ -52,7 +52,8 @@ export async function GET(request: Request, { params }: { params: Promise<{ id: 
         isVisibleToEmployee: employeeDocuments.isVisibleToEmployee,
       })
       .from(employeeDocuments)
-      .where(and(eq(employeeDocuments.orgId, viewer.orgId), eq(employeeDocuments.fileId, id)));
+      // a binned document keeps its file for a restore, but nobody opens it meanwhile
+      .where(and(eq(employeeDocuments.orgId, viewer.orgId), eq(employeeDocuments.fileId, id), isNull(employeeDocuments.deletedAt)));
 
     if (attachments.length > 0) {
       const manages = can(viewer, "hr.document.manage");

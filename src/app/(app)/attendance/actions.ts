@@ -7,6 +7,7 @@ import { db } from "@/db/client";
 import { auditLog } from "@/db/schema/core";
 import { shiftAssignments, shifts } from "@/db/schema/attendance";
 import { can, requirePermission } from "@/lib/session";
+import { drainInBackground } from "@/kernel/events";
 import {
   AttendanceError,
   REQUEST_TYPE_LABEL,
@@ -95,6 +96,8 @@ export async function raiseAttendanceRequest(
       summary: `Raised ${REQUEST_TYPE_LABEL[parsed.data.requestType]} for ${parsed.data.date} (${request.reference})`,
     });
 
+    // the approver is told through the event just committed
+    drainInBackground(viewer.orgId);
     revalidatePath("/attendance/requests");
     revalidatePath("/attendance/my");
     revalidatePath("/attendance/approvals");
@@ -159,6 +162,7 @@ export async function decideAttendance(
       summary: `${parsed.data.decision === "approved" ? "Approved" : "Rejected"} ${result.reference}`,
     });
 
+    drainInBackground(viewer.orgId);
     revalidatePath("/attendance/approvals");
     revalidatePath("/attendance/register");
     revalidatePath("/attendance/monthly");

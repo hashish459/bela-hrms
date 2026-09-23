@@ -29,7 +29,8 @@ export type ModuleId =
   | "people"
   | "attendance"
   | "leave"
-  | "payroll";
+  | "payroll"
+  | "notifications";
 
 /* ------------------------------------------------------------------ calendar */
 
@@ -238,6 +239,27 @@ export interface PayrollPort {
 /* ------------------------------------------------------------------ port map */
 
 /** The registry is typed off this, so `resolve("leave")` is `LeavePort | null`. */
+/* ------------------------------------------------------------- notifications */
+
+/**
+ * What any module may ask of notifications: tell people about something, by
+ * catalogue key. Reached through callPort, so a module that sends
+ * notifications keeps working — silently — when notifications is switched off.
+ */
+export interface NotificationsPort {
+  notify(
+    orgId: string,
+    key: string,
+    input: {
+      context: Record<string, string | number | null | undefined>;
+      subjectEmployeeId?: string | null;
+      approverEmployeeId?: string | null;
+      actorUserId?: string | null;
+      dedupeKey: string;
+    },
+  ): Promise<number>;
+}
+
 export interface PortMap {
   org: OrgPort;
   calendar: CalendarPort;
@@ -245,4 +267,5 @@ export interface PortMap {
   attendance: AttendancePort;
   leave: LeavePort;
   payroll: PayrollPort;
+  notifications: NotificationsPort;
 }

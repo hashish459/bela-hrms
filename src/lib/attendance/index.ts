@@ -12,9 +12,10 @@ import {
   shifts,
 } from "@/db/schema/attendance";
 import { adToBs, addDays, formatBsKey, isSaturday, todayInNepal } from "@/lib/bs";
-import { computeDay, toMinutes, type AttendanceStatus, type ShiftRule } from "./calc";
+import { computeDay, REQUEST_TYPE_LABEL, toMinutes, type AttendanceStatus, type ShiftRule } from "./calc";
 import { resolveChain } from "@/kernel/approvals";
 import { callPort } from "@/kernel/registry";
+import { publish } from "@/kernel/events";
 import type { LeaveDaySpan } from "@/kernel/ports";
 
 export * from "./calc";
@@ -256,6 +257,31 @@ export async function bsMonthRange(dateIso: string) {
 
 /* -------------------------------------------------------------- requests */
 
+/** What every attendance-request event says, so consumers never read our tables. */
+function describeRequest(r: {
+  id: string;
+  reference: string;
+  employeeId: string;
+  date: string;
+  dateBs: string;
+  requestType: string;
+  requestedCheckIn: string | null;
+  requestedCheckOut: string | null;
+  reason: string;
+}) {
+  return {
+    attendanceRequestId: r.id,
+    reference: r.reference,
+    employeeId: r.employeeId,
+    date: r.date,
+    dateBs: r.dateBs,
+    requestType: REQUEST_TYPE_LABEL[r.requestType] ?? r.requestType,
+    requestedCheckIn: r.requestedCheckIn,
+    requestedCheckOut: r.requestedCheckOut,
+    reason: r.reason,
+  };
+}
+
 export type AttendanceRequestInput = {
   orgId: string;
   employeeId: string;
@@ -357,7 +383,7 @@ export async function submitAttendanceRequest(
         currentLevel: 1,
         submittedAt: new Date(),
       })
-      .returning({ id: attendanceRequests.id, reference: attendanceRequests.reference });
+      .returning();
 
     await tx.insert(approvalSteps).values(
       approvers.map((a) => ({
@@ -371,7 +397,15 @@ export async function submitAttendanceRequest(
       })),
     );
 
-    return request;
+    await publish(tx, {
+      orgId: input.orgId,
+      module: "attendance",
+      name: "attendance.request.submitted",
+      payload: { ...describeRequest(request), level: 1, approverEmployeeId: approvers[0]?.approverEmployeeId ?? null },
+      dedupeKey: `attendance.submitted:${request.id}`,
+    });
+
+    return { id: request.id, reference: request.reference };
   });
 }
 
@@ -437,11 +471,18 @@ export async function decideAttendanceRequest(opts: {
         .update(attendanceRequests)
         .set({ status: "rejected", currentLevel: null, decidedAt: new Date(), updatedAt: new Date() })
         .where(eq(attendanceRequests.id, request.id));
+      await publish(tx, {
+        orgId: opts.orgId,
+        module: "attendance",
+        name: "attendance.request.rejected",
+        payload: { ...describeRequest(request), comment: opts.comment ?? null, decidedByUserId: opts.decidedByUserId },
+        dedupeKey: `attendance.rejected:${request.id}`,
+      });
       return { reference: request.reference, finalStatus: "rejected" };
     }
 
     const [nextStep] = await tx
-      .select({ level: approvalSteps.level })
+      .select({ level: approvalSteps.level, approverEmployeeId: approvalSteps.approverEmployeeId })
       .from(approvalSteps)
       .where(
         and(
@@ -458,6 +499,18 @@ export async function decideAttendanceRequest(opts: {
         .update(attendanceRequests)
         .set({ currentLevel: nextStep.level, updatedAt: new Date() })
         .where(eq(attendanceRequests.id, request.id));
+      await publish(tx, {
+        orgId: opts.orgId,
+        module: "attendance",
+        name: "attendance.request.forwarded",
+        payload: {
+          ...describeRequest(request),
+          level: nextStep.level,
+          approverEmployeeId: nextStep.approverEmployeeId,
+          decidedByUserId: opts.decidedByUserId,
+        },
+        dedupeKey: `attendance.forwarded:${request.id}:${nextStep.level}`,
+      });
       return { reference: request.reference, finalStatus: "pending" };
     }
 
@@ -517,6 +570,14 @@ export async function decideAttendanceRequest(opts: {
       .update(attendanceRequests)
       .set({ status: "approved", currentLevel: null, decidedAt: new Date(), updatedAt: new Date() })
       .where(eq(attendanceRequests.id, request.id));
+
+    await publish(tx, {
+      orgId: opts.orgId,
+      module: "attendance",
+      name: "attendance.request.approved",
+      payload: { ...describeRequest(request), comment: opts.comment ?? null, decidedByUserId: opts.decidedByUserId },
+      dedupeKey: `attendance.approved:${request.id}`,
+    });
 
     return { reference: request.reference, finalStatus: "approved" };
   });

@@ -13,6 +13,8 @@ import { BrandLockup } from "@/components/brand";
 import { ThemeToggle } from "@/components/appearance-controls";
 import { Clock } from "@/components/clock";
 import { RoleSwitcher } from "@/components/role-switcher";
+import { NotificationBell } from "@/components/notification-bell";
+import type { BellSummary } from "@/app/(app)/me/notifications/actions";
 
 const RAIL_KEY = "bela-hrms.nav.railed";
 
@@ -20,6 +22,7 @@ export function AppShell({
   modules,
   viewer,
   counts,
+  notifications,
   children,
 }: {
   modules: NavModule[];
@@ -36,6 +39,7 @@ export function AppShell({
     todayAd: string;
   };
   counts?: Record<string, number>;
+  notifications: BellSummary;
   children: React.ReactNode;
 }) {
   const router = useRouter();
@@ -128,6 +132,8 @@ export function AppShell({
           ) : null}
 
           <RoleSwitcher roles={viewer.switchableRoles} actingAs={viewer.actingAs} />
+
+          <NotificationBell initial={notifications} />
 
           <ThemeToggle />
 

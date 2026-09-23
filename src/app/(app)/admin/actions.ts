@@ -1,14 +1,15 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, count, eq, ne } from "drizzle-orm";
+import { and, count, eq, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
-import { user } from "@/db/schema/auth";
+import { session, user } from "@/db/schema/auth";
 import { auditLog, roleGrants, roles, userAccounts, userRoles } from "@/db/schema/core";
 import { employees } from "@/db/schema/hr";
 import { auth } from "@/lib/auth";
 import { requirePermission } from "@/lib/session";
+import { cacheTags, invalidate } from "@/kernel/cache";
 import { ALL_PERMISSIONS, isKnownPermission } from "@/modules/registry";
 
 export type ActionState = {
@@ -70,14 +71,17 @@ export async function createUser(_prev: ActionState, formData: FormData): Promis
   const data = parsed.data;
 
   const existing = await db
-    .select({ id: user.id })
+    .select({ id: user.id, deletedAt: userAccounts.deletedAt })
     .from(user)
+    .leftJoin(userAccounts, eq(userAccounts.userId, user.id))
     .where(eq(user.email, data.email))
     .limit(1);
   if (existing.length) {
     return {
       ok: false,
-      message: "That email address already has a login.",
+      message: existing[0].deletedAt
+        ? "That email belongs to a deleted login. Restore it, or purge it, from Administration › Recycle Bin."
+        : "That email address already has a login.",
       fieldErrors: { email: "Already in use" },
     };
   }
@@ -142,6 +146,8 @@ export async function createUser(_prev: ActionState, formData: FormData): Promis
     summary: `Created login ${data.email} with ${roleIds.length} role(s)`,
   });
 
+  invalidate(cacheTags.authz);
+
   revalidatePath("/admin/users");
   return { ok: true, message: `${data.email} created. They should change the password on first sign-in.` };
 }
@@ -158,7 +164,7 @@ export async function setUserActive(_prev: ActionState, formData: FormData): Pro
   const [account] = await db
     .select()
     .from(userAccounts)
-    .where(and(eq(userAccounts.userId, userId), eq(userAccounts.orgId, viewer.orgId)))
+    .where(and(eq(userAccounts.userId, userId), eq(userAccounts.orgId, viewer.orgId), isNull(userAccounts.deletedAt)))
     .limit(1);
   if (!account) return { ok: false, message: "That login is not in this organisation." };
 
@@ -166,6 +172,8 @@ export async function setUserActive(_prev: ActionState, formData: FormData): Pro
     .update(userAccounts)
     .set({ isActive: !account.isActive })
     .where(eq(userAccounts.userId, userId));
+  // disabling ends every open session at once rather than on its next refresh
+  if (account.isActive) await db.delete(session).where(eq(session.userId, userId));
 
   await db.insert(auditLog).values({
     orgId: viewer.orgId,
@@ -178,6 +186,8 @@ export async function setUserActive(_prev: ActionState, formData: FormData): Pro
     changes: { isActive: { from: account.isActive, to: !account.isActive } },
   });
 
+  invalidate(cacheTags.authz);
+
   revalidatePath("/admin/users");
   return {
     ok: true,
@@ -185,6 +195,77 @@ export async function setUserActive(_prev: ActionState, formData: FormData): Pro
       ? "Login disabled. Existing sessions stop working on their next request."
       : "Login enabled.",
   };
+}
+
+/**
+ * Deletes a login — to the recycle bin, not out of the database.
+ *
+ * The account stops working at once: it is marked deleted and inactive, every
+ * session it holds is revoked, and the cached authorisation for it is dropped.
+ * The row stays so the audit trail keeps pointing at a name and so a mistaken
+ * delete is one click to undo from Administration › Recycle Bin, where it can
+ * also be purged for good (which frees the email address).
+ */
+export async function deleteUser(_prev: ActionState, formData: FormData): Promise<ActionState> {
+  const viewer = await requirePermission("admin.user.manage");
+  const userId = String(formData.get("userId") ?? "");
+  if (!userId) return { ok: false, message: "Unknown user." };
+  if (userId === viewer.userId) return { ok: false, message: "You cannot delete your own login." };
+
+  const [account] = await db
+    .select({
+      isSystemAdmin: userAccounts.isSystemAdmin,
+      email: user.email,
+      name: user.name,
+    })
+    .from(userAccounts)
+    .innerJoin(user, eq(user.id, userAccounts.userId))
+    .where(and(eq(userAccounts.userId, userId), eq(userAccounts.orgId, viewer.orgId), isNull(userAccounts.deletedAt)))
+    .limit(1);
+  if (!account) return { ok: false, message: "That login is not in this organisation." };
+
+  // A system administrator is the break-glass account. Only another one may
+  // remove it, and never the last one standing.
+  if (account.isSystemAdmin) {
+    if (!viewer.isSystemAdmin) {
+      return { ok: false, message: "Only a system administrator can delete a system administrator." };
+    }
+    const [{ n }] = await db
+      .select({ n: count() })
+      .from(userAccounts)
+      .where(
+        and(
+          eq(userAccounts.orgId, viewer.orgId),
+          eq(userAccounts.isSystemAdmin, true),
+          isNull(userAccounts.deletedAt),
+          ne(userAccounts.userId, userId),
+        ),
+      );
+    if (Number(n) === 0) return { ok: false, message: "This is the last system administrator; it cannot be deleted." };
+  }
+
+  await db.transaction(async (tx) => {
+    await tx
+      .update(userAccounts)
+      .set({ isActive: false, deletedAt: new Date(), deletedBy: viewer.name })
+      .where(eq(userAccounts.userId, userId));
+    await tx.delete(session).where(eq(session.userId, userId));
+  });
+
+  await db.insert(auditLog).values({
+    orgId: viewer.orgId,
+    actorUserId: viewer.userId,
+    actorLabel: viewer.name,
+    action: "delete",
+    entityType: "user",
+    entityId: userId,
+    summary: `Deleted login ${account.email} (${account.name}); sessions revoked`,
+  });
+
+  invalidate(cacheTags.authz);
+  revalidatePath("/admin/users");
+  revalidatePath("/admin/recycle-bin");
+  return { ok: true, message: `${account.email} deleted. Restore it from the recycle bin if that was a mistake.` };
 }
 
 const assignRolesSchema = z.object({
@@ -236,6 +317,8 @@ export async function setUserRoles(_prev: ActionState, formData: FormData): Prom
     entityId: userId,
     summary: `Set roles for a login (${clean.length} assigned)`,
   });
+
+  invalidate(cacheTags.authz);
 
   revalidatePath("/admin/users");
   return { ok: true, message: "Roles updated. They apply on the next request." };
@@ -302,6 +385,8 @@ export async function createRole(_prev: ActionState, formData: FormData): Promis
     entityId: role.id,
     summary: `Created role ${parsed.data.name}`,
   });
+
+  invalidate(cacheTags.authz);
 
   revalidatePath("/admin/roles");
   return { ok: true, message: `Role ${parsed.data.name} created with no permissions yet.` };
@@ -385,6 +470,8 @@ export async function setRoleGrants(_prev: ActionState, formData: FormData): Pro
       revoked: { from: null, to: removed.join(", ") || "—" },
     },
   });
+
+  invalidate(cacheTags.authz);
 
   revalidatePath("/admin/roles");
   return {

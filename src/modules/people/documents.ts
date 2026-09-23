@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, asc, eq, isNotNull, lte, sql } from "drizzle-orm";
+import { and, asc, eq, isNotNull, isNull, lte, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
 import { employeeDocuments } from "@/db/schema/selfservice";
@@ -80,7 +80,7 @@ export async function documentDigest(orgId: string, today = todayInNepal()) {
       missingFile: sql<number>`count(*) FILTER (WHERE ${employeeDocuments.fileId} IS NULL AND ${employeeDocuments.fileUrl} IS NULL)::int`,
     })
     .from(employeeDocuments)
-    .where(eq(employeeDocuments.orgId, orgId));
+    .where(and(eq(employeeDocuments.orgId, orgId), isNull(employeeDocuments.deletedAt)));
 
   return row ?? { total: 0, expired: 0, expiring: 0, pending: 0, missingFile: 0 };
 }
@@ -107,6 +107,8 @@ export async function expiringDocuments(orgId: string, limit = 8, today = todayI
     .where(
       and(
         eq(employeeDocuments.orgId, orgId),
+        isNull(employeeDocuments.deletedAt),
+        isNull(employees.deletedAt),
         isNotNull(employeeDocuments.expiresOn),
         lte(employeeDocuments.expiresOn, horizon),
       ),

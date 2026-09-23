@@ -22,6 +22,43 @@ export class LeaveError extends Error {
   }
 }
 
+/**
+ * What every leave event says about its request, beyond the ids.
+ *
+ * Consumers — notifications above all — must be able to describe a request
+ * without reading leave's tables, or a leave schema change becomes their
+ * outage. Everything a sentence about the request needs travels here.
+ */
+function describe(
+  request: {
+    id: string;
+    reference: string;
+    employeeId: string;
+    fromDate: string;
+    toDate: string;
+    fromDateBs: string;
+    toDateBs: string;
+    totalDays: string;
+    portion: string;
+    reason: string;
+  },
+  leaveTypeName: string,
+) {
+  return {
+    leaveRequestId: request.id,
+    reference: request.reference,
+    employeeId: request.employeeId,
+    leaveTypeName,
+    fromDate: request.fromDate,
+    toDate: request.toDate,
+    fromDateBs: request.fromDateBs,
+    toDateBs: request.toDateBs,
+    totalDays: Number(request.totalDays),
+    isHalfDay: request.portion !== "full",
+    reason: request.reason,
+  };
+}
+
 /** Holiday dates in a window, as a set of ISO strings. */
 export async function holidaySet(orgId: string, from: string, to: string): Promise<Set<string>> {
   const rows = await db
@@ -243,6 +280,34 @@ export async function submitLeaveRequest(input: SubmitInput): Promise<{ id: stri
       })),
     );
 
+    // Tells the first approver there is something waiting. Nothing in leave
+    // depends on who hears it.
+    await publish(tx, {
+      orgId: input.orgId,
+      module: "leave",
+      name: "leave.request.submitted",
+      payload: {
+        ...describe(
+          {
+            id: request.id,
+            reference: request.reference,
+            employeeId: input.employeeId,
+            fromDate: input.fromDate,
+            toDate: input.toDate,
+            fromDateBs: formatBsKey(adToBs(input.fromDate)),
+            toDateBs: formatBsKey(adToBs(input.toDate)),
+            totalDays: String(days),
+            portion: input.portion,
+            reason: input.reason,
+          },
+          type.name,
+        ),
+        level: 1,
+        approverEmployeeId: approvers[0]?.approverEmployeeId ?? null,
+      },
+      dedupeKey: `leave.submitted:${request.id}`,
+    });
+
     return request;
   });
 }
@@ -348,7 +413,11 @@ export async function decideLeaveRequest(opts: {
         orgId: opts.orgId,
         module: "leave",
         name: "leave.request.rejected",
-        payload: { leaveRequestId: request.id, employeeId: request.employeeId },
+        payload: {
+          ...describe(request, type?.name ?? "Leave"),
+          comment: opts.comment ?? null,
+          decidedByUserId: opts.decidedByUserId,
+        },
         dedupeKey: `leave.rejected:${request.id}`,
       });
 
@@ -356,7 +425,7 @@ export async function decideLeaveRequest(opts: {
     }
 
     const [nextStep] = await tx
-      .select({ level: approvalSteps.level })
+      .select({ level: approvalSteps.level, approverEmployeeId: approvalSteps.approverEmployeeId })
       .from(approvalSteps)
       .where(
         and(
@@ -373,6 +442,20 @@ export async function decideLeaveRequest(opts: {
         .update(leaveRequests)
         .set({ currentLevel: nextStep.level, updatedAt: new Date() })
         .where(eq(leaveRequests.id, request.id));
+
+      // the next level now has it in front of them
+      await publish(tx, {
+        orgId: opts.orgId,
+        module: "leave",
+        name: "leave.request.forwarded",
+        payload: {
+          ...describe(request, type?.name ?? "Leave"),
+          level: nextStep.level,
+          approverEmployeeId: nextStep.approverEmployeeId,
+          decidedByUserId: opts.decidedByUserId,
+        },
+        dedupeKey: `leave.forwarded:${request.id}:${nextStep.level}`,
+      });
       return { reference: request.reference, finalStatus: "pending" };
     }
 
@@ -409,12 +492,9 @@ export async function decideLeaveRequest(opts: {
       // attendance's decision, made against the calendar — leave does not know
       // and should not know how attendance models a day.
       payload: {
-        leaveRequestId: request.id,
-        employeeId: request.employeeId,
-        fromDate: request.fromDate,
-        toDate: request.toDate,
-        leaveTypeName: type?.name ?? "Leave",
-        isHalfDay: request.portion !== "full",
+        ...describe(request, type?.name ?? "Leave"),
+        comment: opts.comment ?? null,
+        decidedByUserId: opts.decidedByUserId,
         /**
          * The nature and pay percentage travel with the event so attendance and
          * payroll never have to read a leave table to interpret it. Field work
@@ -457,9 +537,22 @@ export async function cancelLeaveRequest(opts: {
     }
 
     const [type] = await tx
-      .select({ deductsBalance: leaveTypes.deductsBalance })
+      .select({ deductsBalance: leaveTypes.deductsBalance, name: leaveTypes.name })
       .from(leaveTypes)
       .where(eq(leaveTypes.id, request.leaveTypeId))
+      .limit(1);
+
+    // who was holding it, so they can be told it is no longer waiting on them
+    const [holder] = await tx
+      .select({ approverEmployeeId: approvalSteps.approverEmployeeId })
+      .from(approvalSteps)
+      .where(
+        and(
+          eq(approvalSteps.entityType, LEAVE_ENTITY),
+          eq(approvalSteps.entityId, request.id),
+          eq(approvalSteps.level, request.currentLevel ?? 1),
+        ),
+      )
       .limit(1);
 
     if (type?.deductsBalance) {
@@ -508,7 +601,12 @@ export async function cancelLeaveRequest(opts: {
       orgId: opts.orgId,
       module: "leave",
       name: "leave.request.withdrawn",
-      payload: { leaveRequestId: request.id, employeeId: request.employeeId },
+      payload: {
+        ...describe(request, type?.name ?? "Leave"),
+        previousStatus: request.status,
+        approverEmployeeId: request.status === "pending" ? (holder?.approverEmployeeId ?? null) : null,
+        cancelReason: opts.reason ?? null,
+      },
       dedupeKey: `leave.withdrawn:${request.id}`,
     });
 

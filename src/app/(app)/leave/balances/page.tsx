@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { leaveBalances, leaveTypes } from "@/db/schema/leave";
 import { requirePermission } from "@/lib/session";
@@ -68,10 +68,7 @@ export default async function LeaveBalancesPage() {
       .where(
         and(
           eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
+          onStrength(),
         ),
       )
       .orderBy(asc(employees.employeeCode)),

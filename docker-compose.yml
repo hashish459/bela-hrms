@@ -71,6 +71,13 @@ services:
       # external URL; the container's own address here breaks the session cookie.
       BETTER_AUTH_URL: https://${APP_DOMAIN}
       TZ: Asia/Kathmandu
+      # Notifications: email is off in production until a transport is set,
+      # and the cron endpoint answers 404 until CRON_SECRET is.
+      NOTIFY_EMAIL_TRANSPORT: ${NOTIFY_EMAIL_TRANSPORT:-}
+      NOTIFY_EMAIL_WEBHOOK_URL: ${NOTIFY_EMAIL_WEBHOOK_URL:-}
+      NOTIFY_EMAIL_WEBHOOK_TOKEN: ${NOTIFY_EMAIL_WEBHOOK_TOKEN:-}
+      NOTIFY_EMAIL_FROM: ${NOTIFY_EMAIL_FROM:-}
+      CRON_SECRET: ${CRON_SECRET:-}
     depends_on:
       postgres:
         condition: service_healthy

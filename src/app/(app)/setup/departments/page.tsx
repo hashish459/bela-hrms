@@ -1,5 +1,6 @@
 import Link from "next/link";
-import { asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
+import { and, asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { departments } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
@@ -13,7 +14,7 @@ export const metadata = { title: "Departments" };
 export default async function DepartmentsPage() {
   const viewer = await requirePermission("setup.structure.view");
   const [rows, usage, staff] = await Promise.all([
-    db.select().from(departments).where(eq(departments.orgId, viewer.orgId)).orderBy(asc(departments.code)),
+    db.select().from(departments).where(and(eq(departments.orgId, viewer.orgId), notDeleted(departments))).orderBy(asc(departments.code)),
     usageFor(viewer.orgId, "department"),
     employedStaff(viewer.orgId),
   ]);

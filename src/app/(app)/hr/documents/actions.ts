@@ -1,7 +1,7 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { auditLog } from "@/db/schema/core";
@@ -258,12 +258,16 @@ export async function deleteDocument(documentId: string): Promise<DocumentFormSt
   const [doc] = await db
     .select()
     .from(employeeDocuments)
-    .where(and(eq(employeeDocuments.id, documentId), eq(employeeDocuments.orgId, viewer.orgId)))
+    .where(and(eq(employeeDocuments.id, documentId), eq(employeeDocuments.orgId, viewer.orgId), isNull(employeeDocuments.deletedAt)))
     .limit(1);
   if (!doc) return { ok: false, message: "That document no longer exists." };
 
-  await db.delete(employeeDocuments).where(eq(employeeDocuments.id, documentId));
-  await dropIfUnreferenced(doc.fileId);
+  // To the recycle bin. The file stays until the entry is purged, so a restore
+  // brings the scan back with it.
+  await db
+    .update(employeeDocuments)
+    .set({ deletedAt: new Date(), deletedBy: viewer.name })
+    .where(eq(employeeDocuments.id, documentId));
 
   await db.insert(auditLog).values({
     orgId: viewer.orgId,
@@ -272,11 +276,11 @@ export async function deleteDocument(documentId: string): Promise<DocumentFormSt
     action: "delete",
     entityType: "employee_document",
     entityId: documentId,
-    summary: `Removed ${doc.title}`,
+    summary: `Moved ${doc.title} to the recycle bin`,
   });
 
   revalidatePath("/hr/documents");
   revalidatePath(`/hr/employees/${doc.employeeId}`);
   revalidatePath("/me/profile");
-  return { ok: true, message: "Document removed." };
+  return { ok: true, message: "Moved to the recycle bin." };
 }

@@ -1,5 +1,5 @@
 import Link from "next/link";
-import { and, desc, eq, sql } from "drizzle-orm";
+import { and, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
 import { employees, probationReviews } from "@/db/schema/hr";
 import { departments, designations } from "@/db/schema/org";
@@ -80,7 +80,7 @@ export default async function ConfirmationsPage({
       .leftJoin(designations, eq(designations.id, employees.designationId))
       .leftJoin(departments, eq(departments.id, employees.departmentId))
       .leftJoin(sql`employees sup`, sql`sup.id = ${employees.supervisorId}`)
-      .where(and(eq(employees.orgId, viewer.orgId), eq(employees.status, "probation"))),
+      .where(and(eq(employees.orgId, viewer.orgId), eq(employees.status, "probation"), isNull(employees.deletedAt))),
 
     db
       .select({

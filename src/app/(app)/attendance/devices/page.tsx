@@ -1,4 +1,5 @@
 import Link from "next/link";
+import { notDeleted } from "@/db/schema/columns";
 import { and, asc, desc, eq, sql } from "drizzle-orm";
 import { AlertTriangle, UserRoundX } from "lucide-react";
 import { db } from "@/db/client";
@@ -76,7 +77,7 @@ export default async function DevicesPage() {
     db
       .select({ id: branches.id, name: branches.name })
       .from(branches)
-      .where(eq(branches.orgId, viewer.orgId))
+      .where(and(eq(branches.orgId, viewer.orgId), notDeleted(branches)))
       .orderBy(asc(branches.name)),
 
     deviceDigest(viewer.orgId),

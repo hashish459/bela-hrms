@@ -12,6 +12,7 @@ import { adToBs, formatBs, todayInNepal } from "@/lib/bs";
 // whole of installation — see src/kernel/boot.ts.
 import { loadModuleStates } from "@/kernel/boot";
 import { switchableRoles } from "./admin/act-as/actions";
+import { bellSummaryFor, sweepInBackground } from "@/modules/notifications/service";
 
 /**
  * Counts shown against nav items, so somebody can see there is work waiting
@@ -76,8 +77,14 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
   // somebody clicks it.
   await loadModuleStates(viewer.orgId);
 
-  const modules = visibleNavigation(viewer.permissions);
-  const counts = await approvalCounts(viewer);
+  // A login with no employee record has no desk, no leave and no attendance of
+  // its own: those items go, rather than opening onto a 403.
+  const modules = visibleNavigation(viewer.permissions, { hasEmployee: !!viewer.employeeId });
+  const [counts, notifications] = await Promise.all([approvalCounts(viewer), bellSummaryFor(viewer.userId)]);
+
+  // Reminders have no event to trigger them. Throttled to once per half hour
+  // per organisation, so a deployment without a scheduler still gets them.
+  sweepInBackground(viewer.orgId);
 
   // Only a system administrator has anything to switch to; everybody else gets
   // an empty list and the control does not render.
@@ -88,6 +95,7 @@ export default async function AppLayout({ children }: LayoutProps<"/">) {
     <AppShell
       modules={modules}
       counts={counts}
+      notifications={notifications}
       viewer={{
         name: viewer.name,
         email: viewer.email,

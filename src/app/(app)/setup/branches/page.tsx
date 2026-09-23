@@ -1,4 +1,5 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
 import { db } from "@/db/client";
 import { branches } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
@@ -12,7 +13,7 @@ export const metadata = { title: "Branches" };
 export default async function BranchesPage() {
   const viewer = await requirePermission("setup.structure.view");
   const [rows, usage] = await Promise.all([
-    db.select().from(branches).where(eq(branches.orgId, viewer.orgId)).orderBy(asc(branches.code)),
+    db.select().from(branches).where(and(eq(branches.orgId, viewer.orgId), notDeleted(branches))).orderBy(asc(branches.code)),
     usageFor(viewer.orgId, "branch"),
   ]);
 

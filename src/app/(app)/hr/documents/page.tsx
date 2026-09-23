@@ -2,7 +2,7 @@ import Link from "next/link";
 import { and, asc, count, desc, eq, gte, ilike, isNull, lte, or, sql, type SQL } from "drizzle-orm";
 import { CalendarClock } from "lucide-react";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { employeeDocuments } from "@/db/schema/selfservice";
 import { can, requirePermission } from "@/lib/session";
 import { addDays, adToBs, formatBs, todayInNepal } from "@/lib/bs";
@@ -53,7 +53,7 @@ export default async function DocumentsPage({ searchParams }: PageProps<"/hr/doc
   const today = todayInNepal();
   const horizon = addDays(today, EXPIRY_WINDOW_DAYS);
 
-  const filters: SQL[] = [eq(employeeDocuments.orgId, viewer.orgId)];
+  const filters: SQL[] = [eq(employeeDocuments.orgId, viewer.orgId), isNull(employeeDocuments.deletedAt)];
 
   if (q) {
     const like = `%${q}%`;
@@ -149,10 +149,7 @@ export default async function DocumentsPage({ searchParams }: PageProps<"/hr/doc
       .where(
         and(
           eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
+          onStrength(),
         ),
       )
       .orderBy(asc(employees.employeeCode)),

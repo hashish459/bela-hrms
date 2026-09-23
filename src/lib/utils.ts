@@ -24,3 +24,22 @@ export function formatNpr(value: string | number | null | undefined): string {
     maximumFractionDigits: 0,
   }).format(n);
 }
+
+const WEEKDAY = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
+const MONTH = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/**
+ * "Thu 16 Jul" for an AD calendar date (YYYY-MM-DD).
+ *
+ * Deliberately not toLocaleDateString: Node and the browser ship different ICU
+ * data ("Thu, 16 Jul" vs "Thu 16 Jul"), and a client component rendered on the
+ * server would then hydrate with different text. Read in UTC so the viewer's
+ * timezone cannot move a calendar date either.
+ */
+export function formatAdDate(iso: string, opts: { weekday?: boolean } = {}): string {
+  const d = new Date(iso.length === 10 ? `${iso}T00:00:00Z` : iso);
+  if (Number.isNaN(d.getTime())) return iso;
+  const day = String(d.getUTCDate()).padStart(2, "0");
+  const text = `${day} ${MONTH[d.getUTCMonth()]}`;
+  return opts.weekday ? `${WEEKDAY[d.getUTCDay()]} ${text}` : text;
+}

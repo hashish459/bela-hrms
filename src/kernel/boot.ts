@@ -21,10 +21,12 @@ import "@/modules/org/module";
 import "@/modules/attendance/module";
 import "@/modules/leave/module";
 import "@/modules/payroll/module";
+import "@/modules/notifications/module";
 
 import { and, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { moduleStates } from "@/db/schema/kernel";
+import { cached, cacheTags, invalidate } from "./cache";
 import { applyOrgModuleStates } from "./registry";
 
 const globalForBoot = globalThis as unknown as { __erpBooted?: boolean };
@@ -45,10 +47,17 @@ boot();
  */
 export async function loadModuleStates(orgId: string): Promise<void> {
   try {
-    const rows = await db
-      .select({ moduleId: moduleStates.moduleId, isEnabled: moduleStates.isEnabled })
-      .from(moduleStates)
-      .where(eq(moduleStates.orgId, orgId));
+    // Read on every request, switched a few times a year: cached, and dropped
+    // the moment `setModuleEnabled` writes.
+    const rows = await cached(
+      `modules:${orgId}`,
+      () =>
+        db
+          .select({ moduleId: moduleStates.moduleId, isEnabled: moduleStates.isEnabled })
+          .from(moduleStates)
+          .where(eq(moduleStates.orgId, orgId)),
+      { ttl: 60, tags: [cacheTags.moduleStates(orgId), cacheTags.org(orgId)] },
+    );
     applyOrgModuleStates(orgId, rows);
   } catch (error) {
     console.error("[kernel] could not load module states:", error);
@@ -82,6 +91,7 @@ export async function setModuleEnabled(input: {
       },
     });
 
+  invalidate(cacheTags.moduleStates(input.orgId));
   await loadModuleStates(input.orgId);
 }
 

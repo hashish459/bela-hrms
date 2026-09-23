@@ -2,11 +2,15 @@ import { notFound } from "next/navigation";
 import { AlertTriangle, FileText, ShieldCheck } from "lucide-react";
 import {
   documents,
+  experience,
   family,
   profile,
   qualifications,
   serviceHistory,
 } from "@/modules/selfservice/desk";
+import { myChanges } from "@/modules/people/changes";
+import { displayValue, SECTION_BY_KEY, type SectionKey } from "@/modules/people/profile-fields";
+import { ChangeRequest, WithdrawChange } from "./change-request";
 import { requireSelf } from "@/modules/selfservice/guard";
 import { adToBs, formatBs, todayInNepal } from "@/lib/bs";
 import { Badge, Card, PageHeader, TableShell, Td, Th, Tr } from "@/components/ui";
@@ -16,18 +20,19 @@ export const metadata = { title: "My profile" };
 
 type Search = { [key: string]: string | string[] | undefined };
 
-const TABS = ["overview", "service", "family", "education", "documents"] as const;
+const TABS = ["overview", "service", "family", "education", "experience", "documents", "requests"] as const;
 type Tab = (typeof TABS)[number];
 
 /**
  * The employee's own record, in the five sections the manual describes.
  *
- * Read-only, and that is a decision rather than an omission. A self-service
- * screen that lets somebody edit their own bank account, PAN or date of joining
- * is a fraud surface; those fields are changed through HR with an audit trail.
- * What an employee may correct — contact details, family, qualifications — is a
- * request workflow, which belongs with the other request workflows and not on a
- * profile page pretending to be a form.
+ * Nothing here writes the record. A self-service screen that lets somebody
+ * edit their own bank account, PAN or date of joining is a fraud surface. What
+ * an employee may correct — contact details, address, emergency contact,
+ * family, qualifications, previous employment, the bank account — they
+ * *request*, and HR applies it after checking; see `modules/people/changes.ts`.
+ * Placement, salary, dates of service and statutory numbers are not offered at
+ * all: those change through HR's own screens.
  */
 export default async function MyProfilePage({ searchParams }: { searchParams: Promise<Search> }) {
   const ctx = await requireSelf("self.profile.view");
@@ -36,13 +41,22 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
   const raw = Array.isArray(params.tab) ? params.tab[0] : params.tab;
   const tab: Tab = (TABS as readonly string[]).includes(raw ?? "") ? (raw as Tab) : "overview";
 
-  const [me, history, kin, quals, docs] = await Promise.all([
+  const [me, history, kin, quals, docs, jobs, requests] = await Promise.all([
     profile(ctx),
     serviceHistory(ctx),
     family(ctx),
     qualifications(ctx),
     documents(ctx),
+    experience(ctx),
+    myChanges(ctx.orgId, ctx.employeeId),
   ]);
+
+  // what is already with HR, so a second request is not offered for it
+  const pendingFor = new Set(
+    requests.filter((r) => r.status === "pending").map((r) => `${r.section}:${r.targetId ?? ""}`),
+  );
+  const isPending = (section: SectionKey, targetId?: string) => pendingFor.has(`${section}:${targetId ?? ""}`);
+  const openRequests = requests.filter((r) => r.status === "pending").length;
 
   if (!me) notFound();
 
@@ -60,7 +74,7 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
     <>
       <PageHeader
         title="My profile"
-        description="Your record as HR holds it. Anything wrong here is corrected by HR, not on this page."
+        description="Your record as HR holds it. Spot something wrong or out of date? Request a change — HR checks and applies it."
       />
 
       {/* ------------------------------------------------------------ identity */}
@@ -108,14 +122,32 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
           { href: "/me/profile?tab=service", label: "Job & service", count: history.length },
           { href: "/me/profile?tab=family", label: "Family", count: kin.length },
           { href: "/me/profile?tab=education", label: "Education & skills", count: quals.length },
+          { href: "/me/profile?tab=experience", label: "Experience", count: jobs.length },
           { href: "/me/profile?tab=documents", label: "Documents", count: docs.length },
+          { href: "/me/profile?tab=requests", label: "My requests", count: openRequests },
         ]}
       />
 
       {/* ------------------------------------------------------------ overview */}
       {tab === "overview" ? (
         <div className="grid gap-4 lg:grid-cols-2">
-          <Panel title="Personal" description="As recorded on your employee file">
+          <Panel
+            title="Personal"
+            description="As recorded on your employee file"
+            action={
+              <ChangeRequest
+                section="personal"
+                pending={isPending("personal")}
+                values={{
+                  fullNameNepali: e.fullNameNepali,
+                  maritalStatus: e.maritalStatus,
+                  bloodGroup: e.bloodGroup,
+                  nationality: e.nationality,
+                  religion: e.religion,
+                }}
+              />
+            }
+          >
             <Facts
               rows={[
                 ["Full name", fullName],
@@ -131,23 +163,58 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                     </span>
                   ) : null,
                 ],
+                ["Blood group", e.bloodGroup],
+                ["Nationality", e.nationality],
                 ["District", e.district],
-                ["Permanent address", e.permanentAddress],
+                [
+                  "Permanent address",
+                  e.permanentAddress,
+                ],
                 ["Current address", e.temporaryAddress],
               ]}
             />
+            <div className="border-t border-line-soft px-4 py-2 text-right">
+              <ChangeRequest
+                section="address"
+                label="Moved? Update your address"
+                pending={isPending("address")}
+                values={{ temporaryAddress: e.temporaryAddress, permanentAddress: e.permanentAddress, district: e.district }}
+              />
+            </div>
           </Panel>
 
-          <Panel title="Contact" description="Used for approvals, payslips and notices">
+          <Panel
+            title="Contact"
+            description="Used for approvals, payslips and notices"
+            action={
+              <ChangeRequest
+                section="contact"
+                pending={isPending("contact")}
+                values={{ mobile: e.mobile, personalEmail: e.personalEmail }}
+              />
+            }
+          >
             <Facts
               rows={[
                 ["Work email", e.workEmail],
                 ["Personal email", e.personalEmail],
                 ["Mobile", e.mobile],
-                ["Emergency contact", e.emergencyContactName],
+                ["Emergency contact", e.emergencyContactName ? `${e.emergencyContactName}${e.emergencyContactRelation ? ` (${e.emergencyContactRelation})` : ""}` : null],
                 ["Emergency number", e.emergencyContactPhone],
               ]}
             />
+            <div className="border-t border-line-soft px-4 py-2 text-right">
+              <ChangeRequest
+                section="emergency"
+                label="Update emergency contact"
+                pending={isPending("emergency")}
+                values={{
+                  emergencyContactName: e.emergencyContactName,
+                  emergencyContactRelation: e.emergencyContactRelation,
+                  emergencyContactPhone: e.emergencyContactPhone,
+                }}
+              />
+            </div>
           </Panel>
 
           <Panel title="Employment" description="Placement and reporting line">
@@ -204,6 +271,10 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                 ["Account", mask(e.bankAccountNumber)],
               ]}
             />
+            <div className="border-t border-line-soft px-4 py-2 text-right">
+              {/* the form is blank on purpose: the account number on file is never sent back to the browser */}
+              <ChangeRequest section="bank" label="Changed bank? Request an update" pending={isPending("bank")} />
+            </div>
           </Panel>
         </div>
       ) : null}
@@ -254,9 +325,10 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
         <Panel
           title="Family and dependants"
           description="Nominees are who a gratuity or death benefit is paid to. Keep this current with HR."
+          action={<ChangeRequest section="family" action="add" label="Add a family member" variant="button" />}
         >
           {kin.length === 0 ? (
-            <PanelEmpty>No family details on file. HR can add them.</PanelEmpty>
+            <PanelEmpty>No family details on file yet. Add them — HR checks and files each one.</PanelEmpty>
           ) : (
             <TableShell className="rounded-none border-0">
               <thead>
@@ -267,6 +339,7 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                   <Th>Occupation</Th>
                   <Th>Contact</Th>
                   <Th>Flags</Th>
+                  <Th className="w-20" />
                 </tr>
               </thead>
               <tbody>
@@ -290,6 +363,16 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                         {f.isEmergencyContact ? <Badge tone="warn">emergency</Badge> : null}
                       </span>
                     </Td>
+                    <Td>
+                      {isPending("family", f.id) ? (
+                        <span className="text-[11px] text-warn">with HR</span>
+                      ) : (
+                        <span className="flex justify-end gap-1">
+                          <ChangeRequest section="family" targetId={f.id} variant="icon" values={rowValues("family", f)} />
+                          <ChangeRequest section="family" action="remove" targetId={f.id} variant="icon" values={rowValues("family", f)} />
+                        </span>
+                      )}
+                    </Td>
                   </Tr>
                 ))}
               </tbody>
@@ -300,6 +383,10 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
 
       {/* ----------------------------------------------------------- education */}
       {tab === "education" ? (
+        <>
+        <div className="mb-3 flex justify-end">
+          <ChangeRequest section="qualification" action="add" label="Add a qualification" variant="button" />
+        </div>
         <div className="grid gap-4 lg:grid-cols-2">
           {(["education", "certification", "training", "skill", "language"] as const).map((kind) => {
             const items = quals.filter((q) => q.kind === kind);
@@ -311,11 +398,19 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
                     <li key={q.id} className="px-4 py-2.5">
                       <p className="flex flex-wrap items-baseline justify-between gap-2">
                         <span className="text-[13px] font-medium text-ink">{q.title}</span>
-                        {q.completedYear ? (
-                          <span className="tabular text-[11px] text-ink-faint">
-                            {q.completedYear}
-                          </span>
-                        ) : null}
+                        <span className="flex items-center gap-1">
+                          {q.completedYear ? (
+                            <span className="tabular text-[11px] text-ink-faint">{q.completedYear}</span>
+                          ) : null}
+                          {isPending("qualification", q.id) ? (
+                            <span className="text-[11px] text-warn">with HR</span>
+                          ) : (
+                            <>
+                              <ChangeRequest section="qualification" targetId={q.id} variant="icon" values={rowValues("qualification", q)} />
+                              <ChangeRequest section="qualification" action="remove" targetId={q.id} variant="icon" values={rowValues("qualification", q)} />
+                            </>
+                          )}
+                        </span>
                       </p>
                       <p className="mt-0.5 text-xs text-ink-soft">
                         {q.institution ?? <Muted>—</Muted>}
@@ -336,10 +431,94 @@ export default async function MyProfilePage({ searchParams }: { searchParams: Pr
           })}
           {quals.length === 0 ? (
             <Panel title="Education and skills">
-              <PanelEmpty>Nothing recorded. Send your certificates to HR to have them added.</PanelEmpty>
+              <PanelEmpty>Nothing recorded yet. Add your degrees and certificates — HR verifies each against the original.</PanelEmpty>
             </Panel>
           ) : null}
         </div>
+        </>
+      ) : null}
+
+      {/* ---------------------------------------------------------- experience */}
+      {tab === "experience" ? (
+        <Panel
+          title="Previous employment"
+          description="Where you worked before joining. Used for experience letters and, under some policies, seniority."
+          action={<ChangeRequest section="experience" action="add" label="Add previous employment" variant="button" />}
+        >
+          {jobs.length === 0 ? (
+            <PanelEmpty>Nothing recorded yet.</PanelEmpty>
+          ) : (
+            <ul className="divide-y divide-line-soft">
+              {jobs.map((j) => (
+                <li key={j.id} className="flex items-start gap-3 px-4 py-3">
+                  <div className="min-w-0 flex-1">
+                    <p className="text-[13px] font-medium text-ink">
+                      {j.designation ? `${j.designation} · ` : ""}
+                      {j.employer}
+                    </p>
+                    <p className="tabular text-[11px] text-ink-faint">
+                      {j.fromDate ? gregorian(j.fromDate) : "?"} – {j.toDate ? gregorian(j.toDate) : "?"}
+                      {j.reasonForLeaving ? ` · left: ${j.reasonForLeaving}` : ""}
+                    </p>
+                    {j.responsibilities ? <p className="mt-1 text-xs text-ink-soft">{j.responsibilities}</p> : null}
+                  </div>
+                  {isPending("experience", j.id) ? (
+                    <span className="text-[11px] text-warn">with HR</span>
+                  ) : (
+                    <span className="flex gap-1">
+                      <ChangeRequest section="experience" targetId={j.id} variant="icon" values={rowValues("experience", j)} />
+                      <ChangeRequest section="experience" action="remove" targetId={j.id} variant="icon" values={rowValues("experience", j)} />
+                    </span>
+                  )}
+                </li>
+              ))}
+            </ul>
+          )}
+        </Panel>
+      ) : null}
+
+      {/* ------------------------------------------------------------ requests */}
+      {tab === "requests" ? (
+        <Panel title="My change requests" description="Everything you have asked HR to change, and what they decided.">
+          {requests.length === 0 ? (
+            <PanelEmpty>No requests yet. Use “Request a change” on any section of your profile.</PanelEmpty>
+          ) : (
+            <ul className="divide-y divide-line-soft">
+              {requests.map((r) => {
+                const def = SECTION_BY_KEY.get(r.section as SectionKey);
+                const changed = (def?.fields ?? []).filter(
+                  (f) => r.action !== "remove" && String(r.proposed[f.name] ?? "") !== String(r.current?.[f.name] ?? ""),
+                );
+                return (
+                  <li key={r.id} className="flex flex-wrap items-start gap-3 px-4 py-3">
+                    <div className="min-w-0 flex-1">
+                      <p className="text-[13px] font-medium text-ink">
+                        {r.action === "add" ? "Add" : r.action === "remove" ? "Remove" : "Change"} {def?.label.toLowerCase() ?? r.section}
+                      </p>
+                      {changed.length ? (
+                        <p className="mt-0.5 text-xs text-ink-soft">
+                          {changed
+                            .slice(0, 4)
+                            .map((f) => `${f.label}: ${displayValue(f, r.proposed[f.name])}`)
+                            .join(" · ")}
+                        </p>
+                      ) : null}
+                      <p className="mt-0.5 text-[11px] text-ink-faint">
+                        {gregorian(r.createdAt.toISOString().slice(0, 10))}
+                        {r.decidedByLabel ? ` · ${r.status} by ${r.decidedByLabel}` : ""}
+                        {r.decisionNote ? ` — ${r.decisionNote}` : ""}
+                      </p>
+                    </div>
+                    <Badge tone={r.status === "approved" ? "ok" : r.status === "rejected" ? "danger" : r.status === "pending" ? "warn" : "neutral"}>
+                      {r.status === "approved" ? "applied" : r.status}
+                    </Badge>
+                    {r.status === "pending" ? <WithdrawChange id={r.id} /> : null}
+                  </li>
+                );
+              })}
+            </ul>
+          )}
+        </Panel>
       ) : null}
 
       {/* ----------------------------------------------------------- documents */}
@@ -449,4 +628,12 @@ function yearsSince(iso: string, today: string): string {
   if (years <= 0 && months <= 0) return "Joined this month";
   if (years <= 0) return `${months} month${months === 1 ? "" : "s"} of service`;
   return `${years}y ${months}m of service`;
+}
+
+/** A row's values keyed like its section's fields, to prefill a correction. */
+function rowValues(section: SectionKey, row: Record<string, unknown>) {
+  const def = SECTION_BY_KEY.get(section)!;
+  return Object.fromEntries(
+    def.fields.map((f) => [f.name, (row[f.name] ?? null) as string | number | boolean | null]),
+  );
 }

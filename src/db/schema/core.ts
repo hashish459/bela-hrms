@@ -183,8 +183,19 @@ export const userAccounts = pgTable(
     mustChangePassword: boolean("must_change_password").notNull().default(false),
     lastLoginAt: timestamp("last_login_at"),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    /**
+     * Deleted from Administration › Users. The login stops working at once
+     * (a deleted account is never a viewer) and the row stays in the recycle
+     * bin until restored or purged, so the audit trail keeps a name to point at.
+     */
+    deletedAt: timestamp("deleted_at"),
+    deletedBy: text("deleted_by"),
   },
-  (t) => [index("user_accounts_org_idx").on(t.orgId)],
+  (t) => [
+    index("user_accounts_org_idx").on(t.orgId),
+    // "does this employee already have a login?" is asked on every link
+    index("user_accounts_employee_idx").on(t.employeeId),
+  ],
 );
 
 export const roles = pgTable(
@@ -246,6 +257,8 @@ export const auditAction = pgEnum("audit_action", [
   "login",
   "logout",
   "login_failed",
+  "restore",
+  "purge",
 ]);
 
 export const auditLog = pgTable(
@@ -269,6 +282,7 @@ export const auditLog = pgTable(
   (t) => [
     index("audit_log_org_created_idx").on(t.orgId, t.createdAt),
     index("audit_log_entity_idx").on(t.entityType, t.entityId),
+    index("audit_log_actor_idx").on(t.actorUserId, t.createdAt),
   ],
 );
 

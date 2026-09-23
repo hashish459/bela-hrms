@@ -1,4 +1,5 @@
-import { asc, eq } from "drizzle-orm";
+import { and, asc, eq } from "drizzle-orm";
+import { notDeleted } from "@/db/schema/columns";
 import { db } from "@/db/client";
 import { employmentTypes } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
@@ -12,7 +13,7 @@ export const metadata = { title: "Employment types" };
 export default async function EmploymentTypesPage() {
   const viewer = await requirePermission("setup.structure.view");
   const [rows, usage] = await Promise.all([
-    db.select().from(employmentTypes).where(eq(employmentTypes.orgId, viewer.orgId)).orderBy(asc(employmentTypes.code)),
+    db.select().from(employmentTypes).where(and(eq(employmentTypes.orgId, viewer.orgId), notDeleted(employmentTypes))).orderBy(asc(employmentTypes.code)),
     usageFor(viewer.orgId, "employment_type"),
   ]);
 

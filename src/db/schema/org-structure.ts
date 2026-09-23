@@ -19,7 +19,7 @@
  * handful of people. It is exposed to other modules through OrgPort and through
  * nothing else.
  */
-import { relations } from "drizzle-orm";
+import { relations, sql } from "drizzle-orm";
 import {
   boolean,
   date,
@@ -30,9 +30,11 @@ import {
   text,
   timestamp,
   unique,
+  uniqueIndex,
   uuid,
   type AnyPgColumn,
 } from "drizzle-orm/pg-core";
+import { softDelete } from "./columns";
 import { organizations } from "./core";
 import { grades } from "./org";
 
@@ -75,9 +77,10 @@ export const orgUnits = pgTable(
     remarks: text("remarks"),
     isActive: boolean("is_active").notNull().default(true),
     createdAt: timestamp("created_at").notNull().defaultNow(),
+    ...softDelete,
   },
   (t) => [
-    unique("org_units_org_kind_code_key").on(t.orgId, t.kind, t.code),
+    uniqueIndex("org_units_org_kind_code_key").on(t.orgId, t.kind, t.code).where(sql`deleted_at is null`),
     index("org_units_org_kind_idx").on(t.orgId, t.kind),
     index("org_units_parent_idx").on(t.parentId),
   ],

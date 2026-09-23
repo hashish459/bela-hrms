@@ -560,6 +560,7 @@ export async function deviceDigest(orgId: string) {
       and(
         eq(employees.orgId, orgId),
         sql`${employees.status} IN ('probation','active','on_leave','suspended')`,
+        sql`${employees.deletedAt} IS NULL`,
       ),
     );
 

@@ -1,6 +1,6 @@
-import { asc, eq, inArray, sql } from "drizzle-orm";
+import { asc, eq, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { departments, designations } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
 import { Card, PageHeader, StatTile } from "@/components/ui";
@@ -39,7 +39,7 @@ export default async function ReportingLinesPage() {
     .leftJoin(designations, eq(designations.id, employees.designationId))
     .leftJoin(departments, eq(departments.id, employees.departmentId))
     .where(
-      sql`${employees.orgId} = ${viewer.orgId} AND ${inArray(employees.status, [...EMPLOYED_STATUSES])}`,
+      sql`${employees.orgId} = ${viewer.orgId} AND ${onStrength()}`,
     )
     .orderBy(asc(designations.hierarchyLevel), asc(employees.employeeCode));
 

@@ -6,7 +6,7 @@ import { ArrowLeft, Router } from "lucide-react";
 import { db } from "@/db/client";
 import { branches } from "@/db/schema/org";
 import { designations } from "@/db/schema/org";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { attendanceDevices, deviceEnrolments, devicePunches } from "@/db/schema/devices";
 import { can, requirePermission } from "@/lib/session";
 import { adToBs, formatBs } from "@/lib/bs";
@@ -130,10 +130,7 @@ export default async function DeviceDetailPage({
       .where(
         and(
           eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
+          onStrength(),
           // Somebody already enrolled on this reader cannot be enrolled twice,
           // so they are left out of the picker rather than offered and refused.
           sql`NOT EXISTS (

@@ -1,9 +1,9 @@
 import Link from "next/link";
-import { and, count, eq, inArray } from "drizzle-orm";
+import { and, count, eq } from "drizzle-orm";
 import type { PgColumn } from "drizzle-orm/pg-core";
 import { db } from "@/db/client";
 import { organizations } from "@/db/schema/core";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { branches, departments, designations, employmentTypes, grades } from "@/db/schema/org";
 import { can, requirePermission } from "@/lib/session";
 import { PageHeader } from "@/components/ui";
@@ -26,7 +26,7 @@ export default async function CompanyProfilePage() {
     db
       .select({ n: count() })
       .from(employees)
-      .where(and(eq(employees.orgId, viewer.orgId), inArray(employees.status, [...EMPLOYED_STATUSES]))),
+      .where(and(eq(employees.orgId, viewer.orgId), onStrength())),
   ]);
 
   const glance = [

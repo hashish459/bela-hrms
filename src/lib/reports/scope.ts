@@ -59,6 +59,7 @@ export async function employeesInScope(
     .where(
       and(
         eq(employees.orgId, orgId),
+        isNull(employees.deletedAt),
         lte(employees.dateOfJoin, to),
         or(isNull(employees.separationDate), gte(employees.separationDate, from)),
         or(inArray(employees.status, [...EMPLOYED_STATUSES]), gte(employees.separationDate, from)),

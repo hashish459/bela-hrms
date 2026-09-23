@@ -5,7 +5,7 @@ import Link from "next/link";
 import { AlertCircle, Check, CheckCircle2, Loader2, X } from "lucide-react";
 import { decideLeave, type ActionState } from "../actions";
 import { Badge, Button, Card, Textarea } from "@/components/ui";
-import { formatDays } from "@/lib/utils";
+import { formatAdDate, formatDays } from "@/lib/utils";
 
 const initial: ActionState = { ok: false };
 
@@ -53,8 +53,7 @@ export function DecisionCard({
     );
   }
 
-  const short = (iso: string) =>
-    new Date(iso).toLocaleDateString("en-GB", { day: "2-digit", month: "short" });
+  const short = (iso: string) => formatAdDate(iso);
 
   return (
     <Card className="flex flex-col">

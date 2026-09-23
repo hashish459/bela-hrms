@@ -1,7 +1,7 @@
 import Link from "next/link";
 import { and, asc, desc, eq, isNull, sql } from "drizzle-orm";
 import { db } from "@/db/client";
-import { employees, EMPLOYED_STATUSES } from "@/db/schema/hr";
+import { employees, onStrength } from "@/db/schema/hr";
 import { departments } from "@/db/schema/org";
 import { shiftAssignments, shifts } from "@/db/schema/attendance";
 import { requirePermission } from "@/lib/session";
@@ -42,10 +42,7 @@ export default async function RosterPage() {
       .where(
         and(
           eq(employees.orgId, viewer.orgId),
-          sql`${employees.status} = ANY(ARRAY[${sql.join(
-            EMPLOYED_STATUSES.map((s) => sql`${s}`),
-            sql`, `,
-          )}]::employee_status[])`,
+          onStrength(),
         ),
       )
       .orderBy(asc(employees.employeeCode)),

@@ -1,6 +1,6 @@
 import "server-only";
 
-import { and, eq } from "drizzle-orm";
+import { and, eq, isNull } from "drizzle-orm";
 import { db } from "@/db/client";
 import { remunerationGroups } from "@/db/schema/org-structure";
 import { employees } from "@/db/schema/hr";
@@ -74,7 +74,7 @@ export async function attendancePolicyFor(
     })
     .from(employees)
     .leftJoin(remunerationGroups, eq(remunerationGroups.id, employees.remunerationGroupId))
-    .where(eq(employees.orgId, orgId));
+    .where(and(eq(employees.orgId, orgId), isNull(employees.deletedAt)));
 
   for (const row of rows) {
     if (!employeeIds.includes(row.employeeId)) continue;

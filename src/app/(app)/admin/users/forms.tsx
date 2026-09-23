@@ -2,7 +2,7 @@
 
 import { useActionState, useState } from "react";
 import { AlertCircle, CheckCircle2, Loader2, UserPlus } from "lucide-react";
-import { createUser, setUserActive, setUserRoles, type ActionState } from "../actions";
+import { createUser, deleteUser, setUserActive, setUserRoles, type ActionState } from "../actions";
 import { Button, Card, CardHeader, Field, Input, Select } from "@/components/ui";
 
 const initial: ActionState = { ok: false };
@@ -228,6 +228,35 @@ export function RoleAssigner({
         </Button>
       </div>
       <span className="sr-only">Roles for {userName}</span>
+    </form>
+  );
+}
+
+export function DeleteUserButton({ userId, email, isSelf }: { userId: string; email: string; isSelf: boolean }) {
+  const [state, action, pending] = useActionState(deleteUser, initial);
+  if (isSelf) return null;
+  if (state.ok) return <span className="text-[11px] text-ok">Deleted</span>;
+
+  return (
+    <form
+      action={action}
+      onSubmit={(e) => {
+        if (!confirm(`Delete the login ${email}? It stops working immediately and every session is signed out. It can be restored from the recycle bin.`)) {
+          e.preventDefault();
+        }
+      }}
+      className="flex flex-col items-end"
+    >
+      <input type="hidden" name="userId" value={userId} />
+      <button
+        type="submit"
+        disabled={pending}
+        aria-label={`Delete ${email}`}
+        className="rounded border border-line px-2 py-1 text-xs text-ink-soft hover:border-danger/40 hover:bg-danger-soft hover:text-danger disabled:opacity-50"
+      >
+        {pending ? "…" : "Delete"}
+      </button>
+      {state.message && !state.ok ? <span className="mt-1 max-w-48 text-[11px] text-danger">{state.message}</span> : null}
     </form>
   );
 }

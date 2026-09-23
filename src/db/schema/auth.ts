@@ -6,7 +6,7 @@
  * person belongs to, which roles they hold, which employee record they are)
  * lives in `core.ts` and references `user.id`.
  */
-import { boolean, pgTable, text, timestamp } from "drizzle-orm/pg-core";
+import { boolean, index, pgTable, text, timestamp } from "drizzle-orm/pg-core";
 
 export const user = pgTable("user", {
   id: text("id").primaryKey(),
@@ -35,7 +35,12 @@ export const session = pgTable("session", {
   userId: text("user_id")
     .notNull()
     .references(() => user.id, { onDelete: "cascade" }),
-});
+}, (t) => [
+  // "sign this person out everywhere" and the session list both read by user
+  index("session_user_idx").on(t.userId),
+  // expired-session cleanup
+  index("session_expires_idx").on(t.expiresAt),
+]);
 
 export const account = pgTable("account", {
   id: text("id").primaryKey(),
@@ -53,7 +58,7 @@ export const account = pgTable("account", {
   password: text("password"),
   createdAt: timestamp("created_at").notNull(),
   updatedAt: timestamp("updated_at").notNull(),
-});
+}, (t) => [index("account_user_idx").on(t.userId)]);
 
 export const verification = pgTable("verification", {
   id: text("id").primaryKey(),
@@ -62,4 +67,4 @@ export const verification = pgTable("verification", {
   expiresAt: timestamp("expires_at").notNull(),
   createdAt: timestamp("created_at").$defaultFn(() => new Date()),
   updatedAt: timestamp("updated_at").$defaultFn(() => new Date()),
-});
+}, (t) => [index("verification_identifier_idx").on(t.identifier)]);

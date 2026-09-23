@@ -20,7 +20,7 @@ import nextTs from "eslint-config-next/typescript";
  * what these rules leave available.
  */
 
-const MODULES = ["attendance", "leave", "org", "calendar", "people", "payroll"];
+const MODULES = ["attendance", "leave", "org", "calendar", "people", "payroll", "notifications"];
 
 /** Everything a module may not import: its siblings, in either location. */
 function isolate(moduleName) {

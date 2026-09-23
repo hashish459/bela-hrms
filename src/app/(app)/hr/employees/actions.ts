@@ -1,12 +1,13 @@
 "use server";
 
 import { revalidatePath } from "next/cache";
-import { and, eq, ne } from "drizzle-orm";
+import { and, eq, isNull, ne } from "drizzle-orm";
 import { z } from "zod";
 import { db } from "@/db/client";
 import { employees } from "@/db/schema/hr";
 import { auditLog } from "@/db/schema/core";
-import { requirePermission } from "@/lib/session";
+import { can, requirePermission } from "@/lib/session";
+import { cacheTags, invalidate } from "@/kernel/cache";
 import { dropIfUnreferenced, PHOTO_MAX_BYTES, putFile } from "@/lib/storage";
 
 const optionalId = z
@@ -55,9 +56,19 @@ const employeeSchema = z.object({
   workEmail: z
     .union([z.email("Enter a valid email address"), z.literal("")])
     .transform((v) => (v === "" ? null : v)),
+  personalEmail: z
+    .union([z.email("Enter a valid email address"), z.literal("")])
+    .transform((v) => (v === "" ? null : v)),
   mobile: optionalText,
   district: optionalText,
   permanentAddress: optionalText,
+  temporaryAddress: optionalText,
+  emergencyContactName: optionalText,
+  emergencyContactRelation: optionalText,
+  emergencyContactPhone: optionalText,
+  bloodGroup: optionalText,
+  nationality: optionalText,
+  religion: optionalText,
   branchId: optionalId,
   departmentId: optionalId,
   designationId: optionalId,
@@ -74,17 +85,30 @@ const employeeSchema = z.object({
     "retired",
   ]),
   dateOfJoin: z.string().regex(/^\d{4}-\d{2}-\d{2}$/, "Date of join is required"),
+  probationEndDate: optionalDate,
   confirmationDate: optionalDate,
   separationDate: optionalDate,
+  noticePeriodDays: z
+    .string()
+    .trim()
+    .transform((v) => (v === "" ? null : Number(v)))
+    .nullable()
+    .refine((v) => v === null || (Number.isInteger(v) && v >= 0 && v <= 365), "Days, 0 to 365"),
   panNumber: optionalText,
+  citizenshipNumber: optionalText,
+  passportNumber: optionalText,
   ssfNumber: optionalText,
   pfNumber: optionalText,
+  citNumber: optionalText,
   bankName: optionalText,
+  bankBranch: optionalText,
   bankAccountNumber: optionalText,
+  // absent from the form entirely for somebody who may not see salaries
   basicSalary: z
     .string()
     .trim()
-    .transform((v) => (v === "" ? null : v))
+    .optional()
+    .transform((v) => (v === "" || v === undefined ? null : v))
     .nullable()
     .refine((v) => v === null || /^\d+(\.\d{1,2})?$/.test(v), "Amount must be a number"),
 });
@@ -123,7 +147,11 @@ export async function saveEmployee(
     return { ok: false, message: "Please correct the highlighted fields.", fieldErrors };
   }
 
-  const data = parsed.data;
+  const data: Partial<typeof parsed.data> = { ...parsed.data };
+
+  // Salary is written only by somebody allowed to see it. The form omits the
+  // field for everybody else, but a crafted request could still send one.
+  if (!can(viewer, "hr.employee.viewSalary")) delete data.basicSalary;
 
   // Employee codes are the human key people quote in email and on paper; a
   // duplicate is a data-quality bug that is painful to unpick later.
@@ -133,7 +161,8 @@ export async function saveEmployee(
     .where(
       and(
         eq(employees.orgId, viewer.orgId),
-        eq(employees.employeeCode, data.employeeCode),
+        eq(employees.employeeCode, data.employeeCode!),
+        isNull(employees.deletedAt),
         employeeId ? ne(employees.id, employeeId) : undefined,
       ),
     )
@@ -161,7 +190,7 @@ export async function saveEmployee(
     const [before] = await db
       .select()
       .from(employees)
-      .where(and(eq(employees.id, employeeId), eq(employees.orgId, viewer.orgId)))
+      .where(and(eq(employees.id, employeeId), eq(employees.orgId, viewer.orgId), isNull(employees.deletedAt)))
       .limit(1);
     if (!before) return { ok: false, message: "That employee no longer exists." };
 
@@ -184,12 +213,17 @@ export async function saveEmployee(
       changes,
     });
 
+    invalidate(cacheTags.people(viewer.orgId));
     revalidatePath("/hr/employees");
     revalidatePath(`/hr/employees/${employeeId}`);
     return { ok: true, message: "Changes saved.", employeeId };
   }
 
-  const [created] = await db.insert(employees).values(values).returning({ id: employees.id });
+  const [created] = await db
+    .insert(employees)
+    .values(values as typeof employees.$inferInsert)
+    .returning({ id: employees.id });
+  invalidate(cacheTags.people(viewer.orgId));
 
   await db.insert(auditLog).values({
     orgId: viewer.orgId,
