@@ -4,10 +4,12 @@ import { db } from "@/db/client";
 import { leaveTypes } from "@/db/schema/leave";
 import { employmentTypes } from "@/db/schema/org";
 import { requirePermission } from "@/lib/session";
-import { Badge, Card, CardHeader, PageHeader, StatTile, TableShell, Td, Th, Tr } from "@/components/ui";
+import { Card, CardHeader, PageHeader, StatTile, TableShell, Td, Th, Tr } from "@/components/ui";
 import { entitlementMatrix, listLeaveGroups } from "@/modules/leave/policy";
 import { formatDays } from "@/lib/utils";
 import { NATURE_LABEL, NatureChip, PayChip } from "./parts";
+import { EntitlementCell, GroupsPanel, type GroupRow } from "./editors";
+import Link from "next/link";
 
 export const metadata = { title: "Leave policy" };
 
@@ -33,6 +35,16 @@ export default async function LeavePolicyPage() {
     types.map((t) => t.id),
   );
   const byPair = new Map(matrix.map((m) => [`${m.leaveTypeId}:${m.employmentTypeId}`, m]));
+
+  const groupRows: GroupRow[] = groups.map((g) => ({
+    id: g.id,
+    code: g.code,
+    name: g.name,
+    nameNepali: g.nameNepali,
+    remarks: g.remarks,
+    sortOrder: g.sortOrder,
+    types: types.filter((t) => t.leaveGroupId === g.id).map((t) => ({ name: t.name, colour: t.colour })),
+  }));
 
   const paidTypes = types.filter((t) => t.nature === "paid").length;
   const encashable = types.filter((t) => t.isEncashable).length;
@@ -132,6 +144,7 @@ export default async function LeavePolicyPage() {
               <Th className="text-right">Level 3 up to</Th>
               <Th className="text-right">Level 4</Th>
               <Th className="text-right">Notice</Th>
+              <Th />
             </tr>
           </thead>
           <tbody>
@@ -150,6 +163,11 @@ export default async function LeavePolicyPage() {
                 <Td className="tabular text-right text-ink-soft">
                   {t.minNoticeDays > 0 ? `${t.minNoticeDays} d` : "—"}
                 </Td>
+                <Td className="text-right">
+                  <Link href={`/leave/types?edit=${t.id}`} className="text-xs text-accent hover:underline">
+                    Edit
+                  </Link>
+                </Td>
               </Tr>
             ))}
           </tbody>
@@ -160,7 +178,7 @@ export default async function LeavePolicyPage() {
       <Card className="mb-5">
         <CardHeader
           title="Entitlement by employment type"
-          description="A permanent employee and a contract employee rarely get the same days. Blank means the leave type's own figure applies."
+          description="A permanent employee and a contract employee rarely get the same days. Click a figure to override it; grey italics are the leave type's own default. The small figure after a slash is the most that can be held."
         />
         {empTypes.length === 0 ? (
           <p className="px-4 py-6 text-sm text-ink-faint">
@@ -186,11 +204,18 @@ export default async function LeavePolicyPage() {
                   {empTypes.map((e) => {
                     const cell = byPair.get(`${t.id}:${e.id}`);
                     return (
-                      <Td key={e.id} className="tabular text-right">
-                        {cell ? (
-                          <span className="text-ink">{formatDays(Number(cell.daysAllowed))}</span>
+                      <Td key={e.id} className="text-right">
+                        {t.deductsBalance ? (
+                          <EntitlementCell
+                            leaveTypeId={t.id}
+                            employmentTypeId={e.id}
+                            days={cell ? Number(cell.daysAllowed) : null}
+                            maxAccumulation={cell?.maxAccumulationDays == null ? null : Number(cell.maxAccumulationDays)}
+                            fallback={Number(t.daysPerYear)}
+                            label={`${t.name} for ${e.name}`}
+                          />
                         ) : (
-                          <span className="text-ink-faint">—</span>
+                          <span className="text-xs text-ink-faint">unlimited</span>
                         )}
                       </Td>
                     );
@@ -211,17 +236,7 @@ export default async function LeavePolicyPage() {
           title="Leave groups"
           description="Reporting buckets several types share. Optional — a type without a group still works."
         />
-        {groups.length === 0 ? (
-          <p className="px-4 py-6 text-sm text-ink-faint">No leave groups defined.</p>
-        ) : (
-          <div className="flex flex-wrap gap-2 p-4">
-            {groups.map((g) => (
-              <Badge key={g.id} tone={g.isActive ? "accent" : "neutral"}>
-                {g.code} · {g.name}
-              </Badge>
-            ))}
-          </div>
-        )}
+        <GroupsPanel groups={groupRows} />
       </Card>
     </>
   );

@@ -2,105 +2,134 @@ import { asc, eq } from "drizzle-orm";
 import { db } from "@/db/client";
 import { leaveTypes } from "@/db/schema/leave";
 import { requirePermission } from "@/lib/session";
-import { Badge, PageHeader } from "@/components/ui";
+import { PageHeader, StatTile } from "@/components/ui";
 import { formatDays } from "@/lib/utils";
-import { ActiveBadge, MasterTable } from "../../setup/page-parts";
+import { leaveTypeUsage } from "@/modules/leave/admin";
+import { listLeaveGroups } from "@/modules/leave/policy";
+import { TypesBoard, type TypeCard } from "./types-board";
 
 export const metadata = { title: "Leave types" };
 
-export default async function LeaveTypesPage() {
+const LAPSE: Record<string, string> = {
+  none: "Never lapse",
+  yearly: "Lapse yearly",
+  monthly: "Lapse monthly",
+  service_period: "Per event",
+};
+
+/**
+ * The leave type catalogue — create, edit, duplicate, switch off and (while
+ * unused) delete. What a type means to attendance and pay, and who may
+ * approve how much of it, is edited here; entitlements by employment type and
+ * groups live on the policy screen.
+ */
+export default async function LeaveTypesPage({ searchParams }: PageProps<"/leave/types">) {
   const viewer = await requirePermission("leave.type.manage");
-  const rows = await db
-    .select()
-    .from(leaveTypes)
-    .where(eq(leaveTypes.orgId, viewer.orgId))
-    .orderBy(asc(leaveTypes.name));
+  const params = await searchParams;
+  const [rows, usage, groups] = await Promise.all([
+    db.select().from(leaveTypes).where(eq(leaveTypes.orgId, viewer.orgId)).orderBy(asc(leaveTypes.leaveOrder), asc(leaveTypes.name)),
+    leaveTypeUsage(viewer.orgId),
+    listLeaveGroups(viewer.orgId),
+  ]);
+  const groupName = new Map(groups.map((g) => [g.id, g.name]));
+
+  const cards: TypeCard[] = rows.map((t) => {
+    const limits = [t.level1LimitDays, t.level2LimitDays, t.level3LimitDays, t.level4LimitDays].slice(0, t.approvalLevels).filter((l) => l !== null);
+    const u = usage.get(t.id);
+    const carry =
+      t.allowCarryForward && (t.lapseType === "yearly" || t.lapseType === "none")
+        ? ` · carry ${t.maxCarryForwardDays === null ? "all" : formatDays(t.maxCarryForwardDays)}`
+        : "";
+    return {
+      id: t.id,
+      code: t.code,
+      name: t.name,
+      nameNepali: t.nameNepali,
+      colour: t.colour,
+      isActive: t.isActive,
+      group: t.leaveGroupId ? (groupName.get(t.leaveGroupId) ?? null) : null,
+      groupId: t.leaveGroupId,
+      summary: {
+        daysPerYear: t.deductsBalance ? `${formatDays(t.daysPerYear)} days` : "Unlimited",
+        paid: Number(t.paidPercent) === 0 ? "Unpaid" : `${Number(t.paidPercent)}%`,
+        lapse: `${LAPSE[t.lapseType]}${carry}`,
+        approvals: `${t.approvalLevels} level${t.approvalLevels === 1 ? "" : "s"}${limits.length ? ` · ${limits.join("/")} d` : ""}`,
+        eligibility:
+          t.appliesTo !== "all" || t.maritalStatus
+            ? [t.appliesTo === "female" ? "Women" : t.appliesTo === "male" ? "Men" : null, t.maritalStatus].filter(Boolean).join(", ")
+            : null,
+      },
+      flags: [
+        t.isEncashable ? "Encashable" : null,
+        t.allowHalfDay ? "Half days" : null,
+        t.minNoticeDays ? `${t.minNoticeDays}d notice` : null,
+        t.maxConsecutiveDays ? `max ${t.maxConsecutiveDays}d` : null,
+        t.requiresAttachmentAfterDays !== null ? `document after ${t.requiresAttachmentAfterDays}d` : null,
+        t.applyWindow === "pre" ? "In advance only" : t.applyWindow === "post" ? "Afterwards only" : null,
+        t.timesAllowedInService ? `${t.timesAllowedInService}× in service` : null,
+      ].filter((f): f is string => Boolean(f)),
+      usage: { requests: u?.requests ?? 0, open: u?.open ?? 0, holders: u?.holders ?? 0 },
+      values: {
+        code: t.code,
+        name: t.name,
+        nameNepali: t.nameNepali,
+        colour: t.colour,
+        leaveGroupId: t.leaveGroupId,
+        nature: t.nature,
+        paidPercent: Number(t.paidPercent),
+        unit: t.unit,
+        leaveOrder: t.leaveOrder,
+        daysPerYear: Number(t.daysPerYear),
+        deductsBalance: t.deductsBalance,
+        allowHalfDay: t.allowHalfDay,
+        allocationRule: t.allocationRule,
+        isAllocatedInFull: t.isAllocatedInFull,
+        appliesTo: t.appliesTo,
+        maritalStatus: t.maritalStatus,
+        minNoticeDays: t.minNoticeDays,
+        maxConsecutiveDays: t.maxConsecutiveDays,
+        requiresAttachmentAfterDays: t.requiresAttachmentAfterDays,
+        applyWindow: t.applyWindow,
+        qualifyFrom: t.qualifyFrom,
+        minDaysToQualify: t.minDaysToQualify,
+        timesAllowedInService: t.timesAllowedInService,
+        maxDaysToApply: t.maxDaysToApply,
+        excludesHolidays: t.excludesHolidays,
+        excludesWeeklyOffs: t.excludesWeeklyOffs,
+        approvalLevels: t.approvalLevels,
+        level1LimitDays: t.level1LimitDays,
+        level2LimitDays: t.level2LimitDays,
+        level3LimitDays: t.level3LimitDays,
+        level4LimitDays: t.level4LimitDays,
+        notifiesHr: t.notifiesHr,
+        lapseType: t.lapseType,
+        allowCarryForward: t.allowCarryForward,
+        maxCarryForwardDays: t.maxCarryForwardDays === null ? null : Number(t.maxCarryForwardDays),
+        maxAccumulationDays: t.maxAccumulationDays === null ? null : Number(t.maxAccumulationDays),
+        isEncashable: t.isEncashable,
+        minDaysToEncash: t.minDaysToEncash === null ? null : Number(t.minDaysToEncash),
+        maxDaysToEncash: t.maxDaysToEncash === null ? null : Number(t.maxDaysToEncash),
+        isExcessDeductedFromPay: t.isExcessDeductedFromPay,
+        isDeductedFromServiceTime: t.isDeductedFromServiceTime,
+      },
+    };
+  });
+
+  const active = rows.filter((t) => t.isActive);
 
   return (
     <>
       <PageHeader
         title="Leave types"
-        description="The policy the approval engine enforces: entitlement, notice, carry forward, and how many levels must sign off."
+        description="Every kind of leave the organisation grants: its entitlement, rules, approval route and what happens to unused days."
       />
-      <MasterTable
-        rows={rows}
-        empty="No leave types defined"
-        columns={[
-          {
-            header: "Type",
-            cell: (r) => (
-              <span className="flex items-center gap-2">
-                <span
-                  className="size-2.5 shrink-0 rounded-full"
-                  style={{ background: r.colour }}
-                  aria-hidden
-                />
-                <span>
-                  <span className="block font-medium text-ink">{r.name}</span>
-                  {r.nameNepali ? (
-                    <span className="block text-xs text-ink-faint">{r.nameNepali}</span>
-                  ) : null}
-                </span>
-              </span>
-            ),
-          },
-          {
-            header: "Code",
-            cell: (r) => <span className="font-mono text-xs text-ink-soft">{r.code}</span>,
-          },
-          {
-            header: "Days / year",
-            align: "right",
-            cell: (r) =>
-              r.deductsBalance ? (
-                <span className="tabular">{formatDays(r.daysPerYear)}</span>
-              ) : (
-                <span className="text-ink-faint">unlimited</span>
-              ),
-          },
-          {
-            header: "Carry forward",
-            cell: (r) =>
-              r.allowCarryForward ? (
-                <span className="tabular text-ink-soft">
-                  up to {formatDays(r.maxCarryForwardDays ?? 0)}
-                </span>
-              ) : (
-                <span className="text-ink-faint">No</span>
-              ),
-          },
-          {
-            header: "Notice",
-            align: "right",
-            cell: (r) => (
-              <span className="tabular text-ink-soft">
-                {r.minNoticeDays > 0 ? `${r.minNoticeDays} d` : "—"}
-              </span>
-            ),
-          },
-          {
-            header: "Approvals",
-            align: "right",
-            cell: (r) => <span className="tabular text-ink-soft">{r.approvalLevels}</span>,
-          },
-          {
-            header: "Applies to",
-            cell: (r) => (
-              <span className="flex flex-wrap gap-1">
-                {r.appliesTo !== "all" ? (
-                  <Badge tone="info" className="capitalize">
-                    {r.appliesTo}
-                  </Badge>
-                ) : (
-                  <span className="text-ink-faint">Everyone</span>
-                )}
-                {!r.isPaid ? <Badge tone="warn">Unpaid</Badge> : null}
-              </span>
-            ),
-          },
-          { header: "Status", cell: (r) => <ActiveBadge active={r.isActive} /> },
-        ]}
-      />
+      <div className="mb-4 grid grid-cols-2 gap-3 lg:grid-cols-4">
+        <StatTile label="Active types" value={active.length} sub={`${rows.length - active.length} switched off`} tone="accent" />
+        <StatTile label="With a balance" value={active.filter((t) => t.deductsBalance).length} sub="tracked per person per year" />
+        <StatTile label="Encashable" value={active.filter((t) => t.isEncashable).length} tone="ok" />
+        <StatTile label="Unpaid" value={active.filter((t) => Number(t.paidPercent) === 0).length} tone="warn" />
+      </div>
+      <TypesBoard cards={cards} groups={groups.map((g) => ({ id: g.id, name: g.name }))} editId={typeof params.edit === "string" ? params.edit : null} />
     </>
   );
 }
